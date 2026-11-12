@@ -1,0 +1,17 @@
+{
+  "name": "usti-model",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node ./scripts/dev.mjs",
+    "download": "node scripts/download.mjs",
+    "preview": "node ./scripts/dev.mjs preview"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "vite": "6.0.11"
+  }
+}

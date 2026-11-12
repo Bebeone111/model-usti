@@ -1,0 +1,626 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const config = JSON.parse(fs.readFileSync(path.join(root, 'area.config.json'), 'utf8'));
+const bbox = config.bbox;
+const dataDir = path.join(root, 'data');
+const UA = 'usti-nad-labem-model/0.1 (local educational 3D city model)';
+
+const b = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+const themes = [
+  ['buildings', `way["building"](${b});relation["building"](${b});`],
+  ['highways', `way["highway"](${b});`],
+  ['landuse', `way["landuse"](${b});relation["landuse"](${b});`],
+  [
+    'water',
+    `way["natural"="water"](${b});relation["natural"="water"](${b});way["waterway"~"^(riverbank|river|dock)$"](${b});relation["waterway"~"^(riverbank|river)$"](${b});`,
+  ],
+];
+
+const endpoints = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+];
+
+function samePt(a, c) {
+  return Math.abs(a[0] - c[0]) < 1e-7 && Math.abs(a[1] - c[1]) < 1e-7;
+}
+
+function isClosed(coords) {
+  return coords.length >= 4 && samePt(coords[0], coords[coords.length - 1]);
+}
+
+function closeRing(coords) {
+  if (coords.length < 3) return null;
+  const ring = coords.slice();
+  if (!samePt(ring[0], ring[ring.length - 1])) ring.push(ring[0].slice());
+  return ring.length >= 4 ? ring : null;
+}
+
+function wayCoords(el) {
+  if (!Array.isArray(el.geometry)) return [];
+  return el.geometry.filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat)).map((p) => [p.lon, p.lat]);
+}
+
+function stitch(parts) {
+  const open = [];
+  const rings = [];
+  for (const part of parts) {
+    if (part.length < 2) continue;
+    if (isClosed(part)) rings.push(part);
+    else open.push(part.slice());
+  }
+  while (open.length) {
+    let cur = open.pop();
+    let grew = true;
+    while (grew && !samePt(cur[0], cur[cur.length - 1])) {
+      grew = false;
+      for (let i = 0; i < open.length; i++) {
+        const o = open[i];
+        if (samePt(cur[cur.length - 1], o[0])) {
+          cur = cur.concat(o.slice(1));
+          open.splice(i, 1);
+          grew = true;
+          break;
+        }
+        if (samePt(cur[cur.length - 1], o[o.length - 1])) {
+          const rev = o.slice(0, -1).reverse();
+          cur = cur.concat(rev);
+          open.splice(i, 1);
+          grew = true;
+          break;
+        }
+      }
+    }
+    if (samePt(cur[0], cur[cur.length - 1]) && cur.length >= 4) rings.push(cur);
+  }
+  return rings;
+}
+
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return a / 2;
+}
+
+function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    const hit = yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+function relationPolygons(el) {
+  const outers = [];
+  const inners = [];
+  for (const member of el.members || []) {
+    if (member.type && member.type !== 'way') continue;
+    const coords = wayCoords(member);
+    if (coords.length < 2) continue;
+    const role = member.role || 'outer';
+    if (role === 'inner') inners.push(coords);
+    else outers.push(coords);
+  }
+  const outerRings = stitch(outers).map(closeRing).filter(Boolean);
+  const innerRings = stitch(inners).map(closeRing).filter(Boolean);
+  const polys = outerRings.map((outer) => ({ outer, holes: [] }));
+  for (const hole of innerRings) {
+    const probe = hole[Math.min(1, hole.length - 1)];
+    let best = null;
+    let bestArea = Infinity;
+    for (const poly of polys) {
+      if (!pointInRing(probe[0], probe[1], poly.outer)) continue;
+      const area = Math.abs(ringArea(poly.outer));
+      if (area < bestArea) {
+        best = poly;
+        bestArea = area;
+      }
+    }
+    if (best) best.holes.push(hole);
+  }
+  return polys;
+}
+
+function propsOf(el) {
+  return { ...(el.tags || {}), osmType: el.type, osmId: el.id };
+}
+
+function polygonFeature(el, polygons) {
+  if (!polygons.length) return null;
+  if (polygons.length === 1) {
+    const p = polygons[0];
+    return {
+      type: 'Feature',
+      properties: propsOf(el),
+      geometry: { type: 'Polygon', coordinates: [p.outer, ...p.holes] },
+    };
+  }
+  return {
+    type: 'Feature',
+    properties: propsOf(el),
+    geometry: {
+      type: 'MultiPolygon',
+      coordinates: polygons.map((p) => [p.outer, ...p.holes]),
+    },
+  };
+}
+
+function lineFeature(el, coords) {
+  if (coords.length < 2) return null;
+  return {
+    type: 'Feature',
+    properties: propsOf(el),
+    geometry: { type: 'LineString', coordinates: coords },
+  };
+}
+
+function convertTheme(name, elements) {
+  const features = [];
+  const memberWayIds = new Set();
+  if (name !== 'highways') {
+    for (const el of elements) {
+      if (el.type !== 'relation') continue;
+      for (const member of el.members || []) {
+        if ((member.type === 'way' || !member.type) && member.ref) memberWayIds.add(member.ref);
+      }
+    }
+  }
+  let skipped = 0;
+  for (const el of elements) {
+    const tags = el.tags || {};
+    if (name === 'buildings' && el.type === 'way' && memberWayIds.has(el.id) && tags.building) {
+      skipped += 1;
+      continue;
+    }
+    if (el.type === 'way') {
+      const coords = wayCoords(el);
+      const closed = isClosed(coords);
+      if (name === 'highways') {
+        const feature = lineFeature(el, coords);
+        if (feature) features.push(feature);
+        else skipped += 1;
+        continue;
+      }
+      if (name === 'water' && tags.waterway && tags.waterway !== 'riverbank' && !closed) {
+        const feature = lineFeature(el, coords);
+        if (feature) features.push(feature);
+        else skipped += 1;
+        continue;
+      }
+      if (!closed) {
+        if (name === 'water' && tags.waterway) {
+          const feature = lineFeature(el, coords);
+          if (feature) features.push(feature);
+        } else skipped += 1;
+        continue;
+      }
+      const feature = polygonFeature(el, [{ outer: coords, holes: [] }]);
+      if (feature) features.push(feature);
+      else skipped += 1;
+      continue;
+    }
+    if (el.type === 'relation') {
+      const feature = polygonFeature(el, relationPolygons(el));
+      if (feature) features.push(feature);
+      else skipped += 1;
+    }
+  }
+  return { features, skipped };
+}
+
+async function overpass(query) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'User-Agent': UA,
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          },
+          body: new URLSearchParams({ data: query }),
+          signal: AbortSignal.timeout(120000),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`${url} HTTP ${res.status}: ${text.slice(0, 180)}`);
+        const json = JSON.parse(text);
+        if (!json.elements) throw new Error(`${url} missing elements`);
+        return { json, url };
+      } catch (error) {
+        lastError = error;
+        console.warn(`Overpass selhal (${url}, pokus ${attempt}): ${error.message}`);
+      }
+    }
+    const wait = 5000 * attempt;
+    console.warn(`Čekám ${wait / 1000}s a zkusím Overpass znovu…`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  throw lastError;
+}
+
+function jpegSize(buf) {
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error('odpověď není JPEG');
+  let i = 2;
+  while (i < buf.length - 8) {
+    if (buf[i] !== 0xff) {
+      i += 1;
+      continue;
+    }
+    const marker = buf[i + 1];
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+    }
+    if (marker === 0xd8 || marker === 0xd9) {
+      i += 2;
+      continue;
+    }
+    const len = buf.readUInt16BE(i + 2);
+    i += 2 + len;
+  }
+  throw new Error('JPEG bez rozměru');
+}
+
+async function downloadOrtho() {
+  const lat0 = (bbox.south + bbox.north) / 2;
+  const mLon = 111320 * Math.cos((lat0 * Math.PI) / 180);
+  const mLat = 110540;
+  const widthM = (bbox.east - bbox.west) * mLon;
+  const heightM = (bbox.north - bbox.south) * mLat;
+  const attempts = [0.55, 0.75, 1.05];
+  let lastError = null;
+  for (const mpp of attempts) {
+    let widthPx = Math.max(64, Math.round(widthM / mpp));
+    let heightPx = Math.max(64, Math.round(heightM / mpp));
+    const cap = 4000;
+    const scale = Math.min(1, cap / Math.max(widthPx, heightPx));
+    widthPx = Math.round(widthPx * scale);
+    heightPx = Math.round(heightPx * scale);
+    const params = new URLSearchParams({
+      SERVICE: 'WMS',
+      REQUEST: 'GetMap',
+      VERSION: '1.3.0',
+      LAYERS: '0',
+      STYLES: '',
+      CRS: 'EPSG:4326',
+      BBOX: `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`,
+      WIDTH: String(widthPx),
+      HEIGHT: String(heightPx),
+      FORMAT: 'image/jpeg',
+      TRANSPARENT: 'FALSE',
+    });
+    const url = `https://ags.cuzk.gov.cz/arcgis1/services/ORTOFOTO/MapServer/WMSServer?${params}`;
+    console.log(`Ortofoto ${widthPx}×${heightPx} px (~${mpp} m/px)…`);
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, Accept: 'image/jpeg' },
+        signal: AbortSignal.timeout(180000),
+      });
+      if (!res.ok) throw new Error(`WMS HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > 40 * 1024 * 1024) throw new Error(`JPEG má ${buf.length} B, limit je 40 MB`);
+      const size = jpegSize(buf);
+      const file = path.join(dataDir, 'ortho.jpg');
+      fs.writeFileSync(file, buf);
+      const pxW = (bbox.east - bbox.west) / size.width;
+      const pxH = (bbox.north - bbox.south) / size.height;
+      const world = [pxW, 0, 0, -pxH, bbox.west + pxW / 2, bbox.north - pxH / 2].join('\n') + '\n';
+      fs.writeFileSync(path.join(dataDir, 'ortho.jgw'), world);
+      return {
+        url,
+        width: size.width,
+        height: size.height,
+        bytes: buf.length,
+        metersPerPixelX: widthM / size.width,
+        metersPerPixelY: heightM / size.height,
+      };
+    } catch (error) {
+      lastError = error;
+      console.warn(`Ortofoto selhalo: ${error.message}`);
+    }
+  }
+  throw lastError;
+}
+
+function tiffValues(view, entry) {
+  const { typ, count, val, at } = entry;
+  const size = typ === 3 ? 2 : typ === 4 ? 4 : typ === 11 ? 4 : typ === 12 ? 8 : 0;
+  if (!size) throw new Error(`Nepodporovaný TIFF typ ${typ}`);
+  const start = size * count <= 4 ? at + 8 : val;
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const p = start + i * size;
+    if (typ === 3) out.push(view.getUint16(p, true));
+    else if (typ === 4) out.push(view.getUint32(p, true));
+    else if (typ === 12) out.push(view.getFloat64(p, true));
+    else out.push(view.getFloat32(p, true));
+  }
+  return out;
+}
+
+function readTiledFloat32(buf) {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (buf[0] !== 0x49 || buf[1] !== 0x49) throw new Error('DMR TIFF není little-endian');
+  const ifd = view.getUint32(4, true);
+  const n = view.getUint16(ifd, true);
+  const tags = new Map();
+  for (let i = 0; i < n; i++) {
+    const at = ifd + 2 + i * 12;
+    tags.set(view.getUint16(at, true), {
+      typ: view.getUint16(at + 2, true),
+      count: view.getUint32(at + 4, true),
+      val: view.getUint32(at + 8, true),
+      at,
+    });
+  }
+  const width = tiffValues(view, tags.get(256))[0];
+  const height = tiffValues(view, tags.get(257))[0];
+  const bps = tiffValues(view, tags.get(258))[0];
+  const compression = tiffValues(view, tags.get(259))[0];
+  if (bps !== 32 || compression !== 1) throw new Error(`DMR TIFF má bps=${bps}, kompresi=${compression}`);
+  const tw = tiffValues(view, tags.get(322))[0];
+  const th = tiffValues(view, tags.get(323))[0];
+  const offsets = tiffValues(view, tags.get(324));
+  const counts = tiffValues(view, tags.get(325));
+  const tilesX = Math.ceil(width / tw);
+  const tilesY = Math.ceil(height / th);
+  const vals = new Array(width * height);
+  let tile = 0;
+  for (let ty = 0; ty < tilesY; ty++) {
+    for (let tx = 0; tx < tilesX; tx++) {
+      const off = offsets[tile];
+      const raw = buf.subarray(off, off + counts[tile]);
+      const tileView = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+      for (let row = 0; row < th; row++) {
+        const gy = ty * th + row;
+        if (gy >= height) break;
+        for (let col = 0; col < tw; col++) {
+          const gx = tx * tw + col;
+          if (gx >= width) continue;
+          vals[gy * width + gx] = tileView.getFloat32((row * tw + col) * 4, true);
+        }
+      }
+      tile += 1;
+    }
+  }
+  let geo = null;
+  if (tags.get(33550) && tags.get(33922)) {
+    const scale = tiffValues(view, tags.get(33550));
+    const tie = tiffValues(view, tags.get(33922));
+    if (scale[0] > 0 && scale[1] > 0) {
+      geo = { scaleX: scale[0], scaleY: scale[1], tieLon: tie[3], tieLat: tie[4] };
+    }
+  }
+  return { width, height, vals, geo };
+}
+
+function bilinearGrid(vals, width, height, col, row) {
+  const c0 = Math.max(0, Math.min(width - 1, Math.floor(col)));
+  const r0 = Math.max(0, Math.min(height - 1, Math.floor(row)));
+  const c1 = Math.min(width - 1, c0 + 1);
+  const r1 = Math.min(height - 1, r0 + 1);
+  const tx = Math.min(1, Math.max(0, col - c0));
+  const ty = Math.min(1, Math.max(0, row - r0));
+  const at = (r, c) => vals[r * width + c];
+  const a = at(r0, c0) * (1 - tx) + at(r0, c1) * tx;
+  const b = at(r1, c0) * (1 - tx) + at(r1, c1) * tx;
+  return a * (1 - ty) + b * ty;
+}
+
+// ArcGIS writes square degrees per pixel, so the TIFF is taller than the
+// requested latitude span and its tiepoint sits north of the bbox. Sampling
+// the file as if it filled the bbox squeezes outside hills into the city.
+function resampleToBbox(grid, box, outW, outH) {
+  const { width, height, vals, geo } = grid;
+  const heights = new Array(outW * outH);
+  for (let r = 0; r < outH; r++) {
+    const lat = box.north - ((r + 0.5) / outH) * (box.north - box.south);
+    for (let c = 0; c < outW; c++) {
+      const lon = box.west + ((c + 0.5) / outW) * (box.east - box.west);
+      let col;
+      let row;
+      if (geo) {
+        col = (lon - geo.tieLon) / geo.scaleX - 0.5;
+        row = (geo.tieLat - lat) / geo.scaleY - 0.5;
+      } else {
+        col = (c + 0.5) / outW * (width - 1);
+        row = (r + 0.5) / outH * (height - 1);
+      }
+      heights[r * outW + c] = bilinearGrid(vals, width, height, col, row);
+    }
+  }
+  return heights;
+}
+
+async function downloadTerrain() {
+  const lat0 = ((bbox.south + bbox.north) / 2) * (Math.PI / 180);
+  const widthM = (bbox.east - bbox.west) * 111320 * Math.cos(lat0);
+  const heightM = (bbox.north - bbox.south) * 110540;
+  const widthPx = Math.max(2, Math.round(widthM / 8));
+  const heightPx = Math.max(2, Math.round(heightM / 8));
+  const service = 'https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage';
+  const params = new URLSearchParams({
+    bbox: `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
+    bboxSR: '4326',
+    imageSR: '4326',
+    size: `${widthPx},${heightPx}`,
+    format: 'tiff',
+    pixelType: 'F32',
+    interpolation: 'RSP_BilinearInterpolation',
+    f: 'image',
+  });
+  const url = `${service}?${params}`;
+  console.log(`DMR 5G ${widthPx}×${heightPx}…`);
+  const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(120000) });
+  if (!res.ok) throw new Error(`DMR 5G HTTP ${res.status} (${service})`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const grid = readTiledFloat32(buf);
+  const filled = grid.vals.map((value) => (Number.isFinite(value) && value > -50 && value < 3000 ? value : null));
+  for (let pass = 0; pass < 6; pass++) {
+    const next = filled.slice();
+    for (let i = 0; i < filled.length; i++) {
+      if (filled[i] != null) continue;
+      const r = Math.floor(i / grid.width);
+      const c = i % grid.width;
+      let sum = 0;
+      let n = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr;
+          const cc = c + dc;
+          if (rr < 0 || cc < 0 || rr >= grid.height || cc >= grid.width) continue;
+          const sample = filled[rr * grid.width + cc];
+          if (sample == null) continue;
+          sum += sample;
+          n += 1;
+        }
+      }
+      if (n) next[i] = sum / n;
+    }
+    filled.splice(0, filled.length, ...next);
+  }
+  if (filled.some((value) => value == null)) throw new Error('DMR 5G má díry, které nešly doplnit');
+  const sampled = resampleToBbox({ ...grid, vals: filled }, bbox, widthPx, heightPx);
+  const heights = sampled.map((value) => Math.round(value * 100) / 100);
+  const elevMin = Math.min(...heights);
+  const elevMax = Math.max(...heights);
+  if (!(elevMin > 50 && elevMax < 1700 && elevMax > elevMin + 5)) {
+    throw new Error(`DMR 5G vrátil nevěrohodný rozsah ${elevMin}–${elevMax}`);
+  }
+  const record = {
+    source: 'ČÚZK DMR 5G',
+    service,
+    exportUrl: url,
+    license: 'CC BY 4.0',
+    attribution: '© ČÚZK',
+    verticalDatum: 'Balt po vyrovnání (Bpv)',
+    downloadedAt: new Date().toISOString(),
+    bbox,
+    width: widthPx,
+    height: heightPx,
+    rowOrder: 'north-first',
+    alignedToBbox: true,
+    sourceGeo: grid.geo,
+    elevMin,
+    elevMax,
+    metersPerPixelX: Math.round((widthM / widthPx) * 1000) / 1000,
+    metersPerPixelY: Math.round((heightM / heightPx) * 1000) / 1000,
+    heights,
+  };
+  fs.writeFileSync(path.join(dataDir, 'terrain.json'), JSON.stringify(record));
+  return {
+    file: 'terrain.json',
+    service,
+    exportUrl: url,
+    width: widthPx,
+    height: heightPx,
+    elevMin,
+    elevMax,
+    verticalDatum: record.verticalDatum,
+    metersPerPixelX: record.metersPerPixelX,
+    metersPerPixelY: record.metersPerPixelY,
+    license: 'Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK, DMR 5G',
+  };
+}
+
+function writeCollection(name, features, copyright) {
+  const collection = {
+    type: 'FeatureCollection',
+    name,
+    bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
+    source: 'OpenStreetMap via Overpass API',
+    license: 'ODbL-1.0',
+    copyright,
+    features,
+  };
+  fs.writeFileSync(path.join(dataDir, `${name}.geojson`), JSON.stringify(collection));
+  return collection;
+}
+
+fs.mkdirSync(dataDir, { recursive: true });
+
+if (process.argv.includes('--terrain-only')) {
+  const terrain = await downloadTerrain();
+  const metaPath = path.join(dataDir, 'meta.json');
+  const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf8')) : { bbox };
+  meta.terrain = terrain;
+  meta.licenses = { ...(meta.licenses || {}), dmr5g: terrain.license };
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  console.log(JSON.stringify(terrain, null, 2));
+  process.exit(0);
+}
+
+console.log(`BBox WGS84: ${bbox.west}, ${bbox.south} – ${bbox.east}, ${bbox.north}`);
+
+let osmTimestamp = null;
+let osmCopyright = null;
+let overpassUrl = null;
+const counts = {};
+const skipped = {};
+
+for (const [name, body] of themes) {
+  const query = `[out:json][timeout:120];(${body});out geom;`;
+  console.log(`OSM ${name}…`);
+  const { json, url } = await overpass(query);
+  overpassUrl = url;
+  osmTimestamp = json.osm3s?.timestamp_osm_base || osmTimestamp;
+  osmCopyright = json.osm3s?.copyright || osmCopyright;
+  const converted = convertTheme(name, json.elements);
+  writeCollection(name, converted.features, osmCopyright);
+  counts[name] = converted.features.length;
+  skipped[name] = converted.skipped;
+  console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
+}
+
+if ((counts.buildings || 0) < 50) {
+  throw new Error('Příliš málo budov — bbox nebo Overpass nevrátil centrum.');
+}
+
+const ortho = await downloadOrtho();
+const terrain = await downloadTerrain();
+const meta = {
+  downloadedAt: new Date().toISOString(),
+  bbox,
+  startHint: config.startHint,
+  origin: {
+    lon: (bbox.west + bbox.east) / 2,
+    lat: (bbox.south + bbox.north) / 2,
+  },
+  osmTimestamp,
+  osmCopyright,
+  overpassUrl,
+  wmsUrl: ortho.url,
+  counts,
+  skipped,
+  ortho: {
+    file: 'ortho.jpg',
+    worldFile: 'ortho.jgw',
+    width: ortho.width,
+    height: ortho.height,
+    bytes: ortho.bytes,
+    metersPerPixelX: ortho.metersPerPixelX,
+    metersPerPixelY: ortho.metersPerPixelY,
+    crs: 'EPSG:4326',
+  },
+  terrain,
+  licenses: {
+    osm: 'Open Database License (ODbL) 1.0',
+    ortofoto: 'Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK',
+    dmr5g: terrain.license,
+  },
+};
+fs.writeFileSync(path.join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2));
+console.log(JSON.stringify({ counts, ortho: meta.ortho, osmTimestamp }, null, 2));
