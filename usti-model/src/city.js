@@ -566,8 +566,10 @@ function facadeMaterial(color) {
 
 const CAFE_GARDEN = {
   name: 'C´UP - coffeeup',
-  lon: 14.0272097,
-  lat: 50.6657839,
+  // Northeast facade, in the paved strip between the house and Palachova.
+  lon: 14.0274401,
+  lat: 50.6657347,
+  yaw: 0.8669,
 };
 
 function addCafeGarden(group, sample, projector) {
@@ -577,23 +579,37 @@ function addCafeGarden(group, sample, projector) {
   const root = new THREE.Group();
   root.name = 'cafe-garden';
   root.position.set(x, y, z);
+  root.rotation.y = CAFE_GARDEN.yaw;
 
   const wood = new THREE.MeshLambertMaterial({ color: 0x8d5a34 });
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.74, 0.07, 18), wood);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.07, 0.9), wood);
   top.position.y = 0.74;
-  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.7, 8), wood);
-  leg.position.y = 0.35;
-  root.add(top, leg);
+  root.add(top);
+  const legGeo = new THREE.BoxGeometry(0.08, 0.7, 0.08);
+  for (const [lx, lz] of [[-1.05, -0.32], [1.05, -0.32], [-1.05, 0.32], [1.05, 0.32]]) {
+    const leg = new THREE.Mesh(legGeo, wood);
+    leg.position.set(lx, 0.35, lz);
+    root.add(leg);
+  }
 
   const shirts = [0x3c6eae, 0xc4553a, 0x3d8b5f, 0xd4a24a, 0x6a4c93, 0x2f6f8f, 0xb85c38, 0x355e78];
   const hairs = [0x3a2c24, 0x1c140f, 0x6b4a32, 0x2a211c, 0x4a3428, 0x111111, 0x8a6844, 0x241810];
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
+  const seats = [
+    [-0.78, 0.86, 0],
+    [0, 0.86, 0],
+    [0.78, 0.86, 0],
+    [-0.78, -0.86, Math.PI],
+    [0, -0.86, Math.PI],
+    [0.78, -0.86, Math.PI],
+    [1.55, 0, Math.PI / 2],
+    [-1.55, 0, -Math.PI / 2],
+  ];
+  seats.forEach(([sx, sz, rot], i) => {
     const guest = makeSeatedGuest(shirts[i], hairs[i]);
-    guest.position.set(Math.cos(angle) * 1.08, 0, Math.sin(angle) * 1.08);
-    guest.rotation.y = Math.PI / 2 - angle;
+    guest.position.set(sx, 0, sz);
+    guest.rotation.y = rot;
     root.add(guest);
-  }
+  });
   group.add(root);
   return { name: CAFE_GARDEN.name, x, y: y + 2.5, z };
 }
