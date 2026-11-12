@@ -48,7 +48,7 @@ Výšky jsou Digitální model reliéfu 5. generace (DMR 5G) z ImageServeru ČÚ
 
 <https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage?bbox=14.0269,50.6544,14.055,50.668&bboxSR=4326&imageSR=4326&size=248,188&format=tiff&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image>
 
-- Soubor: `terrain.json` a kvantizovaný `terrain.bin`, mřížka 248×188, asi 8 m na buňku, sever v prvním řádku. Export z ImageServeru má čtvercové pixely ve stupních, takže TIFF je vyšší než bbox a jeho roh leží severně od výřezu. `download.mjs` ho podle GeoTIFF přepočítá na bbox; jinak by se okolní svahy vmáčkly do severního a jižního okraje. Jemnější rastr: `npm run download -- --terrain-mpp=5`.
+- Soubor: `terrain.json` a kvantizovaný `terrain.bin`, mřížka 248×188, asi 8 m na buňku, sever v prvním řádku. Svah Větruše a pás podél Labe a Bíliny jsou v `terrain-detail.bin` asi po 4 m. Zbytek města zůstává na 8 m. Samotné výřezy: `node scripts/download.mjs --terrain-patches`. Export z ImageServeru má čtvercové pixely ve stupních, takže TIFF je vyšší než bbox a jeho roh leží severně od výřezu. `download.mjs` ho podle GeoTIFF přepočítá na bbox; jinak by se okolní svahy vmáčkly do severního a jižního okraje. Jemnější rastr: `npm run download -- --terrain-mpp=5`.
 - Výškový systém: Balt po vyrovnání (Bpv)
 - Rozsah ve výřezu: **133,3–265,1 m** n. m. Mírové náměstí vychází kolem 145 m, Labe kolem 134 m, severní svah (Mariánská skála) výrazně výš.
 - Staženo 12. 11. 2026. Model vznikl z leteckého laserového skenování 2009–2013 (popis služby).
@@ -56,3 +56,7 @@ Výšky jsou Digitální model reliéfu 5. generace (DMR 5G) z ImageServeru ČÚ
 - Podmínky: <https://cuzk.gov.cz/Predpisy/Podminky-poskytovani-prostor-dat-a-sitovych-sluzeb/Podminky-poskytovani-prostorovych-dat-CUZK.aspx>
 
 DMR 1G ani SRTM nebylo potřeba. Nové `npm run download` stáhne i terén; samotný výškový model znovu stáhnete `node scripts/download.mjs --terrain-only`.
+
+## Textury povrchu
+
+Dlažba a asfalt blízko kamery jsou volné textury [Poly Haven](https://polyhaven.com) (CC0): `concrete_pavement` a `asphalt_02`, zmenšené na 512 px. Nejsou z hrejbrno.cz. Soubory: `public/textures/paving.jpg`, `public/textures/asphalt.jpg`.

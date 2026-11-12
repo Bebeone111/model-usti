@@ -1,8 +1,8 @@
 import './style.css';
 import * as THREE from 'three';
 import area from '../area.config.json';
-import { makeProjector } from './geom.js';
-import { makeTerrain, terrainFromBin } from './terrain.js';
+import { clipPolyline, makeProjector } from './geom.js';
+import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
 import { buildCity, cameraDistance, makeNameSprite, nightGlow, walkBlocked } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
@@ -826,44 +826,99 @@ function setProgress(ratio, step) {
   statusEl.textContent = step;
 }
 
-function addGround(texture, grid) {
+function addGround(texture, grid, pavingTex) {
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = Math.max(texture.anisotropy || 1, renderer.capabilities.getMaxAnisotropy() || 8);
+  const anisotropy = renderer.capabilities.getMaxAnisotropy() || 8;
+  texture.anisotropy = anisotropy;
   texture.needsUpdate = true;
+  const pave = pavingTex || new THREE.DataTexture(new Uint8Array([190, 184, 174, 255]), 1, 1);
+  pave.colorSpace = THREE.SRGBColorSpace;
+  pave.wrapS = THREE.RepeatWrapping;
+  pave.wrapT = THREE.RepeatWrapping;
+  pave.anisotropy = anisotropy;
+  pave.generateMipmaps = true;
+  pave.needsUpdate = true;
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
   const rows = grid.height;
-  const positions = new Float32Array(cols * rows * 3);
-  const uvs = new Float32Array(cols * rows * 2);
-  let p = 0;
-  let u = 0;
-  for (let r = 0; r < rows; r++) {
-    const zn = 1 - r / (rows - 1);
-    const z = minZ + zn * (maxZ - minZ);
-    for (let c = 0; c < cols; c++) {
-      const xn = c / (cols - 1);
-      const x = minX + xn * (maxX - minX);
-      positions[p++] = x;
-      positions[p++] = grid.sample(x, z);
-      positions[p++] = z;
-      uvs[u++] = xn;
-      uvs[u++] = zn;
+  const cellCols = cols - 1;
+  const cellRows = rows - 1;
+  const refined = new Uint8Array(cellCols * cellRows);
+  const at = (c, r) => {
+    const xn = c / cellCols;
+    const zn = 1 - r / cellRows;
+    return [minX + xn * (maxX - minX), minZ + zn * (maxZ - minZ), xn, zn];
+  };
+  for (let r = 0; r < cellRows; r++) {
+    for (let c = 0; c < cellCols; c++) {
+      let hot = grid.weight(at(c + 0.5, r + 0.5)[0], at(c + 0.5, r + 0.5)[1]) > 0.35;
+      if (!hot) {
+        for (const [cc, rr] of [[c, r], [c + 1, r], [c, r + 1], [c + 1, r + 1]]) {
+          const [x, z] = at(cc, rr);
+          if (grid.weight(x, z) > 0.35) hot = true;
+        }
+      }
+      if (hot) refined[r * cellCols + c] = 1;
     }
   }
+  const on = (r, c) => r >= 0 && c >= 0 && r < cellRows && c < cellCols && refined[r * cellCols + c] === 1;
+  const positions = [];
+  const uvs = [];
   const indices = [];
-  for (let r = 0; r < rows - 1; r++) {
-    for (let c = 0; c < cols - 1; c++) {
-      const i = r * cols + c;
-      indices.push(i, i + cols, i + 1, i + 1, i + cols, i + cols + 1);
+  const indexOf = new Map();
+  const vert = (key, x, z, xn, zn) => {
+    let index = indexOf.get(key);
+    if (index == null) {
+      index = positions.length / 3;
+      indexOf.set(key, index);
+      positions.push(x, grid.sample(x, z), z);
+      uvs.push(xn, zn);
+    }
+    return index;
+  };
+  const corner = (c, r) => {
+    const [x, z, xn, zn] = at(c, r);
+    return vert(`g:${c}:${r}`, x, z, xn, zn);
+  };
+  const mid = (key, c0, r0, c1, r1) => {
+    const [x0, z0, u0, v0] = at(c0, r0);
+    const [x1, z1, u1, v1] = at(c1, r1);
+    return vert(key, (x0 + x1) / 2, (z0 + z1) / 2, (u0 + u1) / 2, (v0 + v1) / 2);
+  };
+  for (let r = 0; r < cellRows; r++) {
+    for (let c = 0; c < cellCols; c++) {
+      const hot = on(r, c);
+      const midN = hot || on(r - 1, c);
+      const midS = hot || on(r + 1, c);
+      const midW = hot || on(r, c - 1);
+      const midE = hot || on(r, c + 1);
+      const p00 = corner(c, r);
+      const p10 = corner(c + 1, r);
+      const p01 = corner(c, r + 1);
+      const p11 = corner(c + 1, r + 1);
+      if (!hot && !midN && !midS && !midW && !midE) {
+        indices.push(p00, p01, p10, p10, p01, p11);
+        continue;
+      }
+      const boundary = [p00];
+      if (midW) boundary.push(mid(`v:${c}:${r}`, c, r, c, r + 1));
+      boundary.push(p01);
+      if (midS) boundary.push(mid(`h:${c}:${r + 1}`, c, r + 1, c + 1, r + 1));
+      boundary.push(p11);
+      if (midE) boundary.push(mid(`v:${c + 1}:${r}`, c + 1, r, c + 1, r + 1));
+      boundary.push(p10);
+      if (midN) boundary.push(mid(`h:${c}:${r}`, c, r, c + 1, r));
+      const [cx, cz, cu, cv] = at(c + 0.5, r + 0.5);
+      const center = vert(`c:${c}:${r}`, cx, cz, cu, cv);
+      for (let i = 0; i < boundary.length; i++) indices.push(center, boundary[i], boundary[(i + 1) % boundary.length]);
     }
   }
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const normals = geometry.attributes.normal.array;
@@ -873,26 +928,42 @@ function addGround(texture, grid) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
   groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide });
+  const texel = new THREE.Vector2(1 / Math.max(1, texture.image?.width || 3605), 1 / Math.max(1, texture.image?.height || 2733));
   groundMat.onBeforeCompile = (shader) => {
+    shader.uniforms.paveMap = { value: pave };
+    shader.uniforms.uHasPave = { value: pavingTex ? 1 : 0 };
+    shader.uniforms.uTexel = { value: texel };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);');
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;\nvarying vec2 vGround;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nvarying float vCamDist;')
+      .replace(
+        '#include <map_pars_fragment>',
+        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;',
+      )
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
-        float nearMix = 1.0 - smoothstep(14.0, 48.0, vCamDist);
-        vec2 tile = vMapUv * vec2(2400.0, 1800.0);
-        vec2 cell = fract(tile);
-        float grout = step(0.075, cell.x) * step(0.075, cell.y);
-        float grain = fract(sin(dot(floor(tile), vec2(127.1, 311.7))) * 43758.5453);
-        vec3 stone = mix(vec3(0.52, 0.48, 0.42), vec3(0.78, 0.74, 0.66), grout);
-        stone *= 0.88 + 0.18 * grain;
-        diffuseColor.rgb = mix(diffuseColor.rgb, stone, nearMix * 0.58);`,
+        vec3 blur = (
+          texture2D(map, vMapUv + vec2(uTexel.x, 0.0)).rgb +
+          texture2D(map, vMapUv - vec2(uTexel.x, 0.0)).rgb +
+          texture2D(map, vMapUv + vec2(0.0, uTexel.y)).rgb +
+          texture2D(map, vMapUv - vec2(0.0, uTexel.y)).rgb
+        ) * 0.25;
+        vec3 photo = diffuseColor.rgb;
+        vec3 sharp = clamp(photo + (photo - blur) * 0.95, 0.0, 1.0);
+        float luma = dot(sharp, vec3(0.30, 0.55, 0.15));
+        float green = sharp.g - max(sharp.r, sharp.b);
+        float pale = smoothstep(0.28, 0.48, luma);
+        vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
+        float nearMix = 1.0 - smoothstep(8.0, 46.0, vCamDist);
+        float stone = smoothstep(0.18, 0.34, luma) * (1.0 - smoothstep(0.008, 0.04, green));
+        vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
+        diffuseColor.rgb = mix(photo, settled, nearMix);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(stones, settled, 0.22), nearMix * stone * uHasPave * 0.9);`,
       );
   };
-  groundMat.customProgramCacheKey = () => 'usti-ground-detail';
+  groundMat.customProgramCacheKey = () => 'usti-ground-v3';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1045,32 +1116,20 @@ function updateLampLights(night) {
   const nearest = (furniture?.lamps || [])
     .map((lamp) => ({ lamp, dist: (lamp.x - player.x) ** 2 + (lamp.z - player.z) ** 2 }))
     .sort((a, b) => a.dist - b.dist);
-  const nearStreet = nearest.filter((item) => item.dist < 70 * 70).slice(0, lampLights.length);
+  const nearStreet = nearest.filter((item) => item.dist < 75 * 75).slice(0, lampLights.length);
   lampLights.forEach((entry, index) => {
     const hit = nearStreet[index];
-    let x;
-    let z;
-    let y;
-    if (hit) {
-      x = hit.lamp.x;
-      z = hit.lamp.z;
-      y = hit.lamp.y + 4.2;
-    } else if (allow && index < 4) {
-      const angle = (index / 4) * Math.PI * 2 + 0.4;
-      x = player.x + Math.cos(angle) * 14;
-      z = player.z + Math.sin(angle) * 14;
-      y = player.y + 4.2;
-    } else {
+    if (!hit || strength <= 0) {
       entry.light.intensity = 0;
       entry.glow.visible = false;
       return;
     }
-    entry.light.position.set(x, y, z);
-    entry.light.intensity = (hit ? 2.2 : 1.1) * strength;
-    entry.glow.position.set(x, (hit ? hit.lamp.y : player.y) + 0.22, z);
-    entry.glow.visible = strength > 0.05;
+    entry.light.position.set(hit.lamp.x, hit.lamp.y + 4.2, hit.lamp.z);
+    entry.light.intensity = 2.4 * strength;
+    entry.glow.position.set(hit.lamp.x, hit.lamp.y + 0.2, hit.lamp.z);
+    entry.glow.visible = true;
   });
-  if (lampLights[0]) lampLights[0].glowMat.opacity = 0.16 * strength;
+  if (lampLights[0]) lampLights[0].glowMat.opacity = 0.22 * strength;
 }
 
 function collectWater(water, projector) {
@@ -1147,6 +1206,49 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
+function loadPublicTexture(url) {
+  return new Promise((resolve) => {
+    new THREE.TextureLoader().load(url, resolve, undefined, () => resolve(null));
+  });
+}
+
+function detailZones(water) {
+  const segments = [];
+  const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
+  const onEdge = (ax, az, bx, bz) => {
+    const near = (value, limit) => Math.abs(value - limit) < 1.4;
+    return (
+      (near(ax, projector.minX) && near(bx, projector.minX))
+      || (near(ax, projector.maxX) && near(bx, projector.maxX))
+      || (near(az, projector.minZ) && near(bz, projector.minZ))
+      || (near(az, projector.maxZ) && near(bz, projector.maxZ))
+    );
+  };
+  for (const feature of water?.features || []) {
+    if (feature.properties?.water !== 'river') continue;
+    const geometry = feature.geometry;
+    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
+    for (const ring of rings) {
+      if (!ring?.length) continue;
+      const local = ring.map(([lon, lat]) => projector.toLocal(lon, lat));
+      for (const part of clipPolyline(local, ...box)) {
+        for (let i = 1; i < part.length; i++) {
+          const a = part[i - 1];
+          const b = part[i];
+          if (onEdge(a[0], a[1], b[0], b[1])) continue;
+          segments.push(a[0], a[1], b[0], b[1]);
+        }
+      }
+    }
+  }
+  const [x0, z0] = projector.toLocal(14.036, 50.6544);
+  const [x1, z1] = projector.toLocal(14.0438, 50.6576);
+  return {
+    segments,
+    slope: { minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) },
+  };
+}
+
 async function boot() {
   const jobs = [
     ['meta.json', true],
@@ -1186,8 +1288,19 @@ async function boot() {
     const extra = import.meta.env.DEV ? ' Ve složce aplikace spusťte npm run download.' : '';
     hintEl.textContent = `Ohraničení modelu nesedí s daty.${extra}`;
   }
-  terrain = makeTerrain(terrainGrid, projector);
-  addGround(texture, terrain);
+  let detail = null;
+  try {
+    const extra = await fetchBytes('terrain-detail.bin', onProgress);
+    const parsed = terrainDetailFromBin(extra.buffer.slice(extra.byteOffset, extra.byteOffset + extra.byteLength));
+    const zones = detailZones(loaded.water);
+    detail = { patches: parsed.patches, segments: zones.segments, slope: zones.slope };
+  } catch {
+    detail = null;
+  }
+  terrain = makeTerrain(terrainGrid, projector, detail);
+  const pavingTex = await loadPublicTexture('/textures/paving.jpg');
+  const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
+  addGround(texture, terrain, pavingTex);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1198,6 +1311,7 @@ async function boot() {
       trees: loaded.trees,
       startHint: area.startHint,
       terrain,
+      asphaltMap: asphaltTex,
     },
     projector,
     {
@@ -1287,7 +1401,7 @@ async function boot() {
   lampLights = Array.from({ length: 8 }, () => {
     const light = new THREE.PointLight(0xffb15a, 0, 36, 1);
     light.castShadow = false;
-    const glow = new THREE.Mesh(new THREE.CircleGeometry(4.2, 18), glowMat);
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(2.4, 16), glowMat);
     glow.rotation.x = -Math.PI / 2;
     glow.userData.noShadow = true;
     view.add(light, glow);

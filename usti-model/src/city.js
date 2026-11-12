@@ -17,6 +17,22 @@ import { buildRoadGeometry, makeLineIndex } from './roads.js';
 
 const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
 const ROOFS = [0xd4653a, 0xc4512c, 0xe07040, 0xb8432a, 0xcc5a34, 0xa84830, 0x8d4a3c, 0x5c646c];
+const LANDMARKS = {
+  95522479: 'pavel',
+  43529959: 'vojtech',
+  52106385: 'cathedral',
+  52107614: 'forum',
+  63469970: 'zdar',
+  63470030: 'magistrat',
+};
+const FACADE = {
+  pavel: { color: 0x8c3a32, roof: 0x4a3030, glass: [0.14, 0.16, 0.18], trim: [0.86, 0.78, 0.66], cell: 2.15, mode: 1, glow: 0.35, tower: 'brick' },
+  vojtech: { color: 0xdccbb0, roof: 0x7a4332, glass: [0.16, 0.24, 0.28], trim: [0.94, 0.9, 0.84], cell: 2.55, mode: 1, glow: 0.4, tower: 'stone' },
+  cathedral: { color: 0xe8d9c6, roof: 0x684038, glass: [0.13, 0.2, 0.26], trim: [0.96, 0.93, 0.88], cell: 3.05, mode: 1, glow: 0.42, tower: 'spire' },
+  zdar: { color: 0xf6ead8, roof: 0xc25c38, glass: [0.2, 0.32, 0.38], trim: [0.9, 0.76, 0.56], cell: 3.5, mode: 0, glow: 0.72, tower: null },
+  forum: { color: 0x909aa4, roof: 0x566068, glass: [0.1, 0.26, 0.36], trim: [0.72, 0.76, 0.8], cell: 9, mode: 2, glow: 0.9, tower: null },
+  magistrat: { color: 0xe0cba6, roof: 0x8a4c36, glass: [0.18, 0.28, 0.34], trim: [0.95, 0.9, 0.78], cell: 4.6, mode: 0, glow: 0.5, tower: null },
+};
 const PARKISH = new Set(['park', 'forest', 'recreation_ground', 'grass', 'village_green', 'meadow', 'garden', 'cemetery']);
 
 function hashId(value) {
@@ -471,6 +487,68 @@ function facadeMaterial(color) {
   return material;
 }
 
+function landmarkKey(tags) {
+  const id = Number(tags.osmId);
+  if (LANDMARKS[id]) return LANDMARKS[id];
+  const kind = String(tags.building || '');
+  const name = String(tags.name || '');
+  if (kind === 'cathedral' || /katedr|nanebevzet/i.test(name)) return 'cathedral';
+  if (kind === 'church' || /kostel|chrám|chram/i.test(name)) return /pavla/i.test(name) ? 'pavel' : 'vojtech';
+  return null;
+}
+
+function towerPoint(outer) {
+  const [cx, cz] = ringCentroid(outer);
+  let far = outer[0];
+  let best = -1;
+  for (const point of outer) {
+    const dist = (point[0] - cx) ** 2 + (point[1] - cz) ** 2;
+    if (dist > best) {
+      best = dist;
+      far = point;
+    }
+  }
+  return [cx * 0.64 + far[0] * 0.36, cz * 0.64 + far[1] * 0.36];
+}
+
+function styledFacade(style, name) {
+  const material = new THREE.MeshLambertMaterial({ color: style.color, side: THREE.DoubleSide });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.nightGlow = nightGlow;
+    shader.uniforms.uCell = { value: style.cell };
+    shader.uniforms.uMode = { value: style.mode };
+    shader.uniforms.uGlow = { value: style.glow };
+    shader.uniforms.uGlass = { value: new THREE.Vector3(...style.glass) };
+    shader.uniforms.uTrim = { value: new THREE.Vector3(...style.trim) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying vec2 vFacadeUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvFacadeUv = uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <uv_pars_fragment>',
+        '#include <uv_pars_fragment>\nvarying vec2 vFacadeUv;\nuniform float nightGlow;\nuniform float uCell;\nuniform float uMode;\nuniform float uGlow;\nuniform vec3 uGlass;\nuniform vec3 uTrim;',
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        float nx = mod(vFacadeUv.x, uCell) / uCell;
+        float fy = fract(vFacadeUv.y);
+        float pane = step(0.18, nx) * step(nx, 0.82) * step(0.24, fy) * step(fy, 0.78);
+        if (uMode > 0.5 && uMode < 1.5) pane = step(0.36, nx) * step(nx, 0.64) * step(0.16, fy) * step(fy, 0.9);
+        if (uMode > 1.5) pane = step(0.1, fy) * step(fy, 0.78);
+        float cornice = smoothstep(0.8, 0.9, fy);
+        float base = 1.0 - smoothstep(0.0, 0.16, fy);
+        vec3 tone = diffuseColor.rgb;
+        tone = mix(tone, uGlass, pane * 0.9);
+        tone = mix(tone, uTrim, cornice);
+        tone *= mix(1.0, 0.7, base * 0.8);
+        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow;`,
+      );
+  };
+  material.customProgramCacheKey = () => `usti-landmark-${name}`;
+  return material;
+}
+
 const CAFE_GARDEN = {
   name: "C'UP",
   // Palachova side of the house, in the strip between that wall and the roadway.
@@ -837,6 +915,101 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   return { count: points.length, trunks, canopy };
 }
 
+function asphaltMaterial(texture) {
+  const material = new THREE.MeshLambertMaterial({
+    color: texture ? 0xffffff : 0x3a414c,
+    side: THREE.FrontSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+  });
+  if (!texture) return material;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.asphaltMap = { value: texture };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying vec2 vRoadUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRoadUv = position.xz * 0.18;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D asphaltMap;\nvarying vec2 vRoadUv;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= texture2D(asphaltMap, vRoadUv).rgb;');
+  };
+  material.customProgramCacheKey = () => 'usti-asphalt-v1';
+  return material;
+}
+
+function onMapEdge(ax, az, bx, bz, box) {
+  const [minX, minZ, maxX, maxZ] = box;
+  const near = (value, limit) => Math.abs(value - limit) < 1.4;
+  return (
+    (near(ax, minX) && near(bx, minX))
+    || (near(ax, maxX) && near(bx, maxX))
+    || (near(az, minZ) && near(bz, minZ))
+    || (near(az, maxZ) && near(bz, maxZ))
+  );
+}
+
+function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift) {
+  const y0 = sample(ax, az) + lift;
+  const y1 = sample(bx, bz) + lift;
+  const y2 = sample(bx + ox, bz + oz) + lift;
+  const y3 = sample(ax + ox, az + oz) + lift;
+  positions.push(ax, y0, az, bx, y1, bz, bx + ox, y2, bz + oz, ax, y0, az, bx + ox, y2, bz + oz, ax + ox, y3, az + oz);
+}
+
+function addShores(group, rings, sample, box) {
+  const gravel = [];
+  const wet = [];
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.8) continue;
+      if (onMapEdge(a[0], a[1], b[0], b[1], box)) continue;
+      const pieces = Math.max(1, Math.ceil(len / 24));
+      for (let s = 0; s < pieces; s++) {
+        const t0 = s / pieces;
+        const t1 = (s + 1) / pieces;
+        const ax = a[0] + dx * t0;
+        const az = a[1] + dz * t0;
+        const bx = a[0] + dx * t1;
+        const bz = a[1] + dz * t1;
+        const ox = (dz / len) * 8.5;
+        const oz = (-dx / len) * 8.5;
+        pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.2);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, sample, 0.28);
+      }
+    }
+  }
+  const make = (positions, color, factor) => {
+    if (positions.length < 9) return;
+    const normals = new Float32Array(positions.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    group.add(
+      new THREE.Mesh(
+        geometry,
+        new THREE.MeshLambertMaterial({
+          color,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: factor,
+          polygonOffsetUnits: factor,
+        }),
+      ),
+    );
+  };
+  make(gravel, 0xc6b59a, -2);
+  make(wet, 0x5e6d66, -3);
+}
+
 export async function buildCity(data, projector, hooks = {}) {
   const tick = async (phase, done, total) => {
     if (!hooks.onSlice) return;
@@ -848,9 +1021,9 @@ export async function buildCity(data, projector, hooks = {}) {
   const carriageways = makeLineIndex(roads.centerlines);
   const wallBuckets = WALLS.map(() => ({ plain: [], windows: [] }));
   const roofBuckets = ROOFS.map(() => []);
+  const styledParts = Object.fromEntries(Object.keys(FACADE).map((name) => [name, { walls: [], roofs: [] }]));
   const doorParts = [];
   const walkParts = [];
-  const paveParts = [];
   const asphaltParts = [];
   const waterParts = [];
   const parkParts = [];
@@ -859,6 +1032,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const buildingLabels = new Map();
   const streetLabels = new Map();
   const riverLabels = new Map();
+  const shoreRings = [];
   const stats = { buildings: 0, skippedBuildings: 0, roads: 0, sidewalks: 0, water: 0, labels: 0, trees: 0 };
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
 
@@ -870,6 +1044,7 @@ export async function buildCity(data, projector, hooks = {}) {
     const wallIndex = hashId(colorKey) % WALLS.length;
     const roofIndex = hashId(`${colorKey}:roof`) % ROOFS.length;
     const name = niceName(tags.name);
+    const styleName = landmarkKey(tags);
     let placed = false;
     eachPolygon(feature.geometry, (coords) => {
       if (!coords?.[0]) return;
@@ -891,22 +1066,26 @@ export async function buildCity(data, projector, hooks = {}) {
       const shape = String(tags['roof:shape'] || '');
       const area = Math.abs(signedArea(outer));
       const pitched = !holes.length && top >= 5 && area >= 48 && shape !== 'flat' && shape !== 'skillion' && convexOpen(outer);
+      const roofTarget = styleName ? styledParts[styleName].roofs : roofBuckets[roofIndex];
       if (pitched) {
         const rise = Math.min(4.6, Math.max(1.6, Math.sqrt(area) * 0.22));
         const hip = pyramidRoof(outer, sample, top, rise);
-        if (hip) roofBuckets[roofIndex].push(geometryFromParts([hip]));
+        if (hip) roofTarget.push(geometryFromParts([hip]));
       } else {
         const roof = triangulate(outer, holes, 0, 1);
         if (roof) {
           const p = roof.positions;
           for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + top + 0.35;
-          roofBuckets[roofIndex].push(geometryFromParts([roof]));
+          roofTarget.push(geometryFromParts([roof]));
         }
       }
       const walls = geometryFromParts(strips);
       if (walls) {
-        const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
-        bucket.push(walls);
+        if (styleName) styledParts[styleName].walls.push(walls);
+        else {
+          const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
+          bucket.push(walls);
+        }
       }
       const door = doorStrip(outer, sample, base, top, streetEdge(outer, carriageways));
       if (door) doorParts.push(door);
@@ -921,10 +1100,9 @@ export async function buildCity(data, projector, hooks = {}) {
         blocksCamera: true,
         ...bounds,
       });
-      const kind = String(tags.building || '');
-      if ((kind === 'church' || kind === 'cathedral') && area > 40) {
-        const [tx, tz] = ringCentroid(outer);
-        towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area });
+      if (styleName && FACADE[styleName].tower && area > 40) {
+        const [tx, tz] = towerPoint(outer);
+        towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area, tower: FACADE[styleName].tower });
       }
       if (name) {
         const [cx, cz] = ringCentroid(outer);
@@ -945,7 +1123,6 @@ export async function buildCity(data, projector, hooks = {}) {
 
   drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
   drapeFlat(roads.walk, sample, 0.14, walkParts);
-  drapeFlat(roads.pave, sample, 0.22, paveParts);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -970,6 +1147,7 @@ export async function buildCity(data, projector, hooks = {}) {
         waterParts.push(conformSurface(flat, sample, 0.1));
         stats.water += 1;
       }
+      if (tags.water === 'river') shoreRings.push(outer);
       if (tags.name && feature.geometry?.type !== 'LineString') {
         rememberLine(riverLabels, tags.name, outer.concat([outer[0]]), sample, 9);
       }
@@ -1032,19 +1210,37 @@ export async function buildCity(data, projector, hooks = {}) {
     if (!geometry) return;
     group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })));
   });
+  for (const [name, parts] of Object.entries(styledParts)) {
+    const style = FACADE[name];
+    const walls = mergeList(parts.walls);
+    if (walls) group.add(new THREE.Mesh(walls, styledFacade(style, name)));
+    const roofs = mergeList(parts.roofs);
+    if (roofs) group.add(new THREE.Mesh(roofs, new THREE.MeshLambertMaterial({ color: style.roof, side: THREE.DoubleSide })));
+  }
   const keptTowers = [];
   for (const tower of towers.sort((a, b) => b.area - a.area)) {
     if (keptTowers.some((kept) => Math.hypot(kept.x - tower.x, kept.z - tower.z) < 16)) continue;
     keptTowers.push(tower);
-    const width = Math.min(7, Math.max(3.2, Math.sqrt(tower.area) * 0.16));
-    const height = tower.top + 14;
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(width, height, width), new THREE.MeshLambertMaterial({ color: 0xcbb89a }));
+    const spire = tower.tower === 'spire';
+    const brick = tower.tower === 'brick';
+    const width = spire ? 3.6 : brick ? 5.4 : 4.6;
+    const height = tower.top + (spire ? 26 : brick ? 18 : 15);
+    const shaftColor = brick ? 0x7a342c : 0xe4d6c2;
+    const capColor = brick ? 0x3c2826 : 0x5e3832;
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(width, height, width), new THREE.MeshLambertMaterial({ color: shaftColor }));
     shaft.position.set(tower.x, tower.y + height / 2, tower.z);
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(width * 0.78, 5.5, 4), new THREE.MeshLambertMaterial({ color: 0x6d3830 }));
-    cap.position.set(tower.x, tower.y + height + 2.4, tower.z);
+    const capH = spire ? 12 : 5.2;
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(width * (spire ? 0.62 : 0.78), capH, 4), new THREE.MeshLambertMaterial({ color: capColor }));
+    cap.position.set(tower.x, tower.y + height + capH / 2, tower.z);
     cap.rotation.y = Math.PI / 4;
-    group.add(shaft, cap);
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(width * 1.04, 0.45, width * 1.04),
+      new THREE.MeshLambertMaterial({ color: brick ? 0x2c1c1a : 0x4a4038 }),
+    );
+    band.position.set(tower.x, tower.y + height * 0.72, tower.z);
+    group.add(shaft, cap, band);
   }
+  addShores(group, shoreRings, sample, box);
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
@@ -1074,38 +1270,9 @@ export async function buildCity(data, projector, hooks = {}) {
       ),
     );
   }
-  const paving = geometryFromParts(paveParts);
-  if (paving) {
-    group.add(
-      new THREE.Mesh(
-        paving,
-        new THREE.MeshLambertMaterial({
-          color: 0xd5d0c6,
-          transparent: true,
-          opacity: 0.16,
-          depthWrite: false,
-          side: THREE.FrontSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -2,
-          polygonOffsetUnits: -2,
-        }),
-      ),
-    );
-  }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    group.add(
-      new THREE.Mesh(
-        asphalt,
-        new THREE.MeshLambertMaterial({
-          color: 0x3a414c,
-          side: THREE.FrontSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -4,
-          polygonOffsetUnits: -4,
-        }),
-      ),
-    );
+    group.add(new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap)));
   }
   const waterMesh = geometryFromParts(waterParts);
   let waterMaterial = null;

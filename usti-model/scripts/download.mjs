@@ -733,7 +733,109 @@ function writeCollection(name, features, copyright) {
   return collection;
 }
 
+async function downloadTerrainPatch(box, meters) {
+  const lat0 = ((box.south + box.north) / 2) * (Math.PI / 180);
+  const widthM = (box.east - box.west) * 111320 * Math.cos(lat0);
+  const heightM = (box.north - box.south) * 110540;
+  const widthPx = Math.max(2, Math.round(widthM / meters));
+  const heightPx = Math.max(2, Math.round(heightM / meters));
+  if (widthPx * heightPx > 80000) throw new Error(`Příliš jemný výřez ${widthPx}×${heightPx}`);
+  const service = 'https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage';
+  const params = new URLSearchParams({
+    bbox: `${box.west},${box.south},${box.east},${box.north}`,
+    bboxSR: '4326',
+    imageSR: '4326',
+    size: `${widthPx},${heightPx}`,
+    format: 'tiff',
+    pixelType: 'F32',
+    interpolation: 'RSP_BilinearInterpolation',
+    f: 'image',
+  });
+  const res = await fetch(`${service}?${params}`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(120000) });
+  if (!res.ok) throw new Error(`DMR 5G HTTP ${res.status} (${box.west},${box.south})`);
+  const grid = readTiledFloat32(Buffer.from(await res.arrayBuffer()));
+  const filled = grid.vals.map((value) => (Number.isFinite(value) && value > -50 && value < 3000 ? value : null));
+  for (let pass = 0; pass < 6; pass++) {
+    const next = filled.slice();
+    for (let i = 0; i < filled.length; i++) {
+      if (filled[i] != null) continue;
+      const r = Math.floor(i / grid.width);
+      const c = i % grid.width;
+      let sum = 0;
+      let n = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr;
+          const cc = c + dc;
+          if (rr < 0 || cc < 0 || rr >= grid.height || cc >= grid.width) continue;
+          const sample = filled[rr * grid.width + cc];
+          if (sample == null) continue;
+          sum += sample;
+          n += 1;
+        }
+      }
+      if (n) next[i] = sum / n;
+    }
+    filled.splice(0, filled.length, ...next);
+  }
+  if (filled.some((value) => value == null)) throw new Error('DMR 5G má díry v detailním výřezu');
+  const sampled = resampleToBbox({ ...grid, vals: filled }, box, widthPx, heightPx);
+  const heights = sampled.map((value) => Math.round(value * 100) / 100);
+  const elevMin = Math.min(...heights);
+  const elevMax = Math.max(...heights);
+  if (!(elevMin > 50 && elevMax < 1700 && elevMax > elevMin + 1)) {
+    throw new Error(`Detail DMR vrátil nevěrohodný rozsah ${elevMin}–${elevMax}`);
+  }
+  return { ...box, width: widthPx, height: heightPx, elevMin, elevMax, heights };
+}
+
+function writeTerrainDetail(patches) {
+  let bytes = 8;
+  for (const patch of patches) bytes += 28 + patch.heights.length * 2;
+  const buf = Buffer.alloc(bytes);
+  buf.write('HDET', 0, 'ascii');
+  buf.writeUInt16LE(1, 4);
+  buf.writeUInt16LE(patches.length, 6);
+  let offset = 8;
+  for (const patch of patches) {
+    buf.writeFloatLE(patch.west, offset);
+    buf.writeFloatLE(patch.south, offset + 4);
+    buf.writeFloatLE(patch.east, offset + 8);
+    buf.writeFloatLE(patch.north, offset + 12);
+    buf.writeUInt16LE(patch.width, offset + 16);
+    buf.writeUInt16LE(patch.height, offset + 18);
+    buf.writeFloatLE(patch.elevMin, offset + 20);
+    buf.writeFloatLE(patch.elevMax, offset + 24);
+    offset += 28;
+    const span = patch.elevMax - patch.elevMin || 1;
+    for (let i = 0; i < patch.heights.length; i++) {
+      const t = (patch.heights[i] - patch.elevMin) / span;
+      buf.writeUInt16LE(Math.max(0, Math.min(65535, Math.round(t * 65535))), offset);
+      offset += 2;
+    }
+  }
+  const file = path.join(dataDir, 'terrain-detail.bin');
+  fs.writeFileSync(file, buf);
+  return buf.length;
+}
+
 fs.mkdirSync(dataDir, { recursive: true });
+
+if (process.argv.includes('--terrain-patches')) {
+  const patches = [
+    { west: 14.036, south: 50.6544, east: 14.0438, north: 50.6576 },
+    { west: 14.0269, south: 50.6544, east: 14.0452, north: 50.6592 },
+    { west: 14.041, south: 50.6544, east: 14.055, north: 50.6622 },
+  ];
+  const records = [];
+  for (const patch of patches) {
+    console.log(`Detail DMR ${patch.west},${patch.south}…`);
+    records.push(await downloadTerrainPatch(patch, 4));
+  }
+  const bytes = writeTerrainDetail(records);
+  console.log(JSON.stringify({ bytes, patches: records.map(({ west, south, east, north, width, height, elevMin, elevMax }) => ({ west, south, east, north, width, height, elevMin, elevMax })) }, null, 2));
+  process.exit(0);
+}
 
 if (process.argv.includes('--terrain-only')) {
   const terrain = await downloadTerrain();

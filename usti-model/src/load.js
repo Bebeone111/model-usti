@@ -1,4 +1,4 @@
-export const DATA_REV = '20261112d';
+export const DATA_REV = '20261112e';
 
 const LABELS = {
   'buildings.geojson': 'Budovy',
@@ -11,6 +11,7 @@ const LABELS = {
   'pois.json': 'Místa',
   'meta.json': 'Popis dat',
   'terrain.bin': 'Terén',
+  'terrain-detail.bin': 'Terén břehů',
   'terrain.json': 'Terén',
   'ortho-mobile.jpg': 'Letecký snímek',
   'ortho.jpg': 'Letecký snímek',
