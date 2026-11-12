@@ -13,6 +13,8 @@ Prohlížeč: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 Ovládání: **WASD** chůze (výchozí 3,6 m/s, posuvník 1–16), **Shift** nebo tlačítko Rychle asi čtyřnásobek, **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši. Kolečko mění odstup kamery, **V** přepíná první osobu, **M** mapu, **E** kartu místa, **Tab** nápovědu. Jemnější terén při novém stažení: `npm run download -- --terrain-mpp=5` (výchozí je 8 m, nasazená mřížka zůstává u osmi metrů).
 
+HTML žádá indexaci (`robots` a `robots.txt`). Nasazený hosting k tomu někdy přidá hlavičku `x-robots-tag: noindex`; tu z projektu nejde přepsat.
+
 Data už jsou ve složce `public/data/` (Vite je zkopíruje do sestavené aplikace na `/data/`). Znovu je stáhnete pomocí `npm run download` (potřebuje síť).
 
 ## Jak zvětšit oblast

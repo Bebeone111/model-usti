@@ -28,8 +28,8 @@ function instanced(geometry, material, points, place) {
 function stripeGeometry() {
   const pieces = [];
   for (let i = 0; i < 4; i++) {
-    const piece = new THREE.BoxGeometry(0.32, 0.05, 2.5);
-    piece.translate((i - 1.5) * 0.7, 0, 0);
+    const piece = new THREE.BoxGeometry(0.48, 0.04, 3.4);
+    piece.translate((i - 1.5) * 0.95, 0, 0);
     pieces.push(piece);
   }
   return mergeGeometries(pieces, false);
@@ -56,9 +56,17 @@ export function addStreetFurniture(group, collection, projector, sample) {
   }
   const root = new THREE.Group();
   root.name = 'furniture';
-  const lampMat = new THREE.MeshLambertMaterial({ color: 0xf4e2a8, emissive: 0xf0c56a, emissiveIntensity: 0.05 });
+  const lampMat = new THREE.MeshLambertMaterial({ color: 0xf4e2a8, emissive: 0xffc56a, emissiveIntensity: 0.35 });
+  const benchGeo = new THREE.BoxGeometry(1.8, 0.1, 0.48);
+  benchGeo.translate(0, 0.5, 0);
+  const backGeo = new THREE.BoxGeometry(1.8, 0.42, 0.08);
+  backGeo.translate(0, 0.86, -0.2);
+  const stopGeo = new THREE.BoxGeometry(0.16, 3.1, 1.15);
+  stopGeo.translate(0, 1.7, 0);
+  const stopCap = new THREE.BoxGeometry(1.15, 0.08, 0.7);
+  stopCap.translate(0, 3.2, 0.2);
   const meshes = [
-    instanced(new THREE.BoxGeometry(1.2, 0.08, 0.36).translate(0, 0.48, 0), new THREE.MeshLambertMaterial({ color: 0x6d4c34 }), benches, (dummy, point) => {
+    instanced(mergeGeometries([benchGeo, backGeo]), new THREE.MeshLambertMaterial({ color: 0x6d4c34 }), benches, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, 1);
@@ -73,7 +81,7 @@ export function addStreetFurniture(group, collection, projector, sample) {
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
-    instanced(new THREE.BoxGeometry(0.12, 2.4, 0.9).translate(0, 1.5, 0), new THREE.MeshLambertMaterial({ color: 0x2f5f86 }), stops, (dummy, point) => {
+    instanced(mergeGeometries([stopGeo, stopCap]), new THREE.MeshLambertMaterial({ color: 0x2f5f86 }), stops, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, 1);
@@ -96,6 +104,7 @@ export function addStreetFurniture(group, collection, projector, sample) {
   if (meshes.length) group.add(root);
   return {
     lampMat,
+    lamps,
     counts: { bench: benches.length, lamp: lamps.length, stop: stops.length, bin: bins.length, crossing: crossings.length },
     setDensity(factor) {
       for (const mesh of meshes) mesh.count = Math.max(0, Math.floor(mesh.userData.fullCount * factor));
@@ -126,6 +135,7 @@ export function addBridgeMarks(group, highways, projector, sample) {
     const pts = feature.geometry.coordinates.map(([lon, lat]) => projector.toLocal(lon, lat));
     if (pts.length < 2) continue;
     const tall = /Mariánský/.test(name);
+    const tops = [];
     for (const t of [0.16, 0.84]) {
       const index = Math.min(pts.length - 1, Math.max(0, Math.round(t * (pts.length - 1))));
       const [x, z] = pts[index];
@@ -136,7 +146,17 @@ export function addBridgeMarks(group, highways, projector, sample) {
       mark.rotation.y = Math.atan2(next[0] - x, next[1] - z);
       mark.userData.noShadow = true;
       group.add(mark);
+      const height = tall ? 22 : 9;
+      tops.push(new THREE.Vector3(x, sample(x, z) + height - 0.2, z));
       count += 1;
+    }
+    if (tall && tops.length === 2) {
+      const sag = tops[0].clone().lerp(tops[1], 0.5);
+      sag.y -= 3.2;
+      const cables = new THREE.BufferGeometry().setFromPoints([tops[0], sag, tops[1]]);
+      const wire = new THREE.Line(cables, new THREE.LineBasicMaterial({ color: 0xe7eef4 }));
+      wire.userData.noShadow = true;
+      group.add(wire);
     }
   }
   return count;
@@ -146,19 +166,21 @@ export function addVetruseMark(group, projector, sample) {
   const [x, z] = projector.toLocal(14.039608, 50.655013);
   if (!inside(projector, x, z)) return false;
   const y = sample(x, z);
-  const deck = new THREE.Mesh(
-    new THREE.CylinderGeometry(5.2, 5.4, 0.35, 10),
-    new THREE.MeshLambertMaterial({ color: 0xe7d7bf }),
-  );
-  deck.position.set(x, y + 16.2, z);
-  const railMat = new THREE.MeshLambertMaterial({ color: 0x8d5a3a });
-  const rail = new THREE.Mesh(new THREE.TorusGeometry(5.1, 0.12, 6, 12), railMat);
+  const wall = new THREE.MeshLambertMaterial({ color: 0xd9c3a2 });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x7a3e32 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(11, 5.4, 7.5), wall);
+  body.position.set(x, y + 2.7, z);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(12, 0.8, 8.4), roofMat);
+  roof.position.set(x, y + 5.8, z);
+  const deck = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 6.4, 0.28, 12), new THREE.MeshLambertMaterial({ color: 0xe7d7bf }));
+  deck.position.set(x, y + 6.4, z);
+  const rail = new THREE.Mesh(new THREE.TorusGeometry(6.05, 0.1, 6, 16), new THREE.MeshLambertMaterial({ color: 0x8d5a3a }));
   rail.rotation.x = Math.PI / 2;
-  rail.position.set(x, y + 17.1, z);
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 6, 6), new THREE.MeshLambertMaterial({ color: 0x6e5438 }));
-  mast.position.set(x, y + 19.2, z);
-  for (const mesh of [deck, rail, mast]) mesh.userData.noShadow = true;
-  group.add(deck, rail, mast);
+  rail.position.set(x, y + 7.05, z);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 4.2, 6), new THREE.MeshLambertMaterial({ color: 0x6e5438 }));
+  mast.position.set(x, y + 8.4, z);
+  for (const mesh of [body, roof, deck, rail, mast]) mesh.userData.noShadow = true;
+  group.add(body, roof, deck, rail, mast);
   return true;
 }
 
@@ -211,11 +233,23 @@ export function addTrolleys(group, routes, projector, sample) {
   const fleet = new THREE.Group();
   fleet.name = 'trolleys';
   fleet.add(body, roof);
+  const wireMat = new THREE.LineBasicMaterial({ color: 0xc5ced6 });
+  for (const line of chosen) {
+    const pts = line.pts.map((point) => new THREE.Vector3(point.x, sample(point.x, point.z) + 5.6, point.z));
+    if (pts.length < 2) continue;
+    const wire = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), wireMat);
+    wire.userData.noShadow = true;
+    fleet.add(wire);
+  }
   group.add(fleet);
   const dummy = new THREE.Object3D();
   let cursor = 0;
   return {
+    setEnabled(on) {
+      fleet.visible = on;
+    },
     update(dt) {
+      if (!fleet.visible) return;
       cursor = (cursor + dt * 7) % (path.length * 6);
       for (let i = 0; i < count; i++) {
         const at = (cursor / 6 + (i * path.length) / count) % path.length;

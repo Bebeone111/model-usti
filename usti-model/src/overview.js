@@ -81,7 +81,7 @@ function paintBase(geometry, bounds) {
   return { canvas };
 }
 
-export function createOverview({ mini, canvas, panel, geometry, bounds, getPlayer, getWhere, getPois, search, onTeleport, onPoi, onHome, onTour }) {
+export function createOverview({ mini, canvas, panel, geometry, bounds, getPlayer, getWhere, getPois, getLabels = () => [], getGoal = () => null, search, onTeleport, onPoi, onHome, onTour }) {
   const base = paintBase(geometry, bounds);
   const miniCtx = mini.getContext('2d');
   const ctx = canvas.getContext('2d');
@@ -135,9 +135,35 @@ export function createOverview({ mini, canvas, panel, geometry, bounds, getPlaye
       ctx.fillStyle = poi.visited ? '#f0d78c' : '#f7f3ea';
       ctx.strokeStyle = '#1a140c';
       ctx.lineWidth = 2;
-      ctx.arc(sx, sy, poi.visited ? 6 : 5, 0, Math.PI * 2);
+      ctx.arc(sx, sy, view.ppm > 1.1 ? 8 : 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      if (view.ppm > 0.85) {
+        ctx.font = '13px system-ui, sans-serif';
+        ctx.fillStyle = '#f7f3ea';
+        ctx.fillText(poi.name, sx + 10, sy + 4);
+      }
+    }
+    if (view.ppm > 2.1) {
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(247, 243, 234, 0.86)';
+      const seen = [];
+      for (const label of getLabels()) {
+        if (label.kind !== 'street') continue;
+        const sx = rect.width / 2 + (label.x - view.x) * view.ppm;
+        const sy = rect.height / 2 - (label.z - view.z) * view.ppm;
+        if (sx < 8 || sy < 8 || sx > rect.width - 8 || sy > rect.height - 8) continue;
+        if (seen.some((item) => Math.hypot(item.sx - sx, item.sy - sy) < 70)) continue;
+        seen.push({ sx, sy });
+        ctx.fillText(label.text, sx, sy);
+      }
+    }
+    const goal = getGoal();
+    if (goal) {
+      const sx = rect.width / 2 + (goal.x - view.x) * view.ppm;
+      const sy = rect.height / 2 - (goal.z - view.z) * view.ppm;
+      ctx.fillStyle = '#f0c14e';
+      ctx.fillRect(sx - 4, sy - 10, 8, 8);
     }
     drawArrow(ctx, rect.width / 2 + (player.x - view.x) * view.ppm, rect.height / 2 - (player.z - view.z) * view.ppm, player.yaw, 11);
     const meters = niceScale(110 / view.ppm);
@@ -173,6 +199,17 @@ export function createOverview({ mini, canvas, panel, geometry, bounds, getPlaye
       if (sx < 2 || sy < 2 || sx > width - 2 || sy > height - 2) continue;
       miniCtx.fillStyle = poi.visited ? '#f0d78c' : '#f7f3ea';
       miniCtx.fillRect(sx - 2, sy - 2, 4, 4);
+    }
+    const goal = getGoal();
+    if (goal) {
+      const sx = width / 2 + (goal.x - player.x) * ppm;
+      const sy = height / 2 - (goal.z - player.z) * ppm;
+      if (sx > 4 && sy > 4 && sx < width - 4 && sy < height - 4) {
+        miniCtx.fillStyle = '#f0c14e';
+        miniCtx.beginPath();
+        miniCtx.arc(sx, sy, 4, 0, Math.PI * 2);
+        miniCtx.fill();
+      }
     }
     drawArrow(miniCtx, width / 2, height / 2, player.yaw, 8);
     miniCtx.fillStyle = '#f7f3ea';

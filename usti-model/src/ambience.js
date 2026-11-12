@@ -44,6 +44,10 @@ export function createAmbience() {
       master.gain.setTargetAtTime(enabled ? 0.012 : 0, audio.currentTime, 0.06);
       return enabled;
     },
+    presence(nearWater) {
+      if (!enabled || !ctx || !master) return;
+      master.gain.setTargetAtTime(nearWater ? 0.028 : 0.012, ctx.currentTime, 0.25);
+    },
     step(moving, fast) {
       if (!enabled || !ctx || !moving) return;
       const now = ctx.currentTime;

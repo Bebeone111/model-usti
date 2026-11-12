@@ -1,11 +1,11 @@
 import './style.css';
 import * as THREE from 'three';
 import area from '../area.config.json';
-import { makeProjector } from './geom.js';
-import { makeTerrain, terrainFromBin } from './terrain.js';
-import { buildCity, cameraDistance, makeNameSprite, walkBlocked } from './city.js';
+import { clipPolyline, makeProjector } from './geom.js';
+import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
+import { buildCity, cameraDistance, makeNameSprite, nightGlow, walkBlocked } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
-import { updateLabels } from './labels.js';
+import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
 import { addBridgeMarks, addStreetFurniture, addTrolleys, addVetruseMark } from './furniture.js';
@@ -29,9 +29,9 @@ coarseQuery.addEventListener('change', () => {
 });
 
 const PRESETS = {
-  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false },
-  medium: { dpr: 1.45, shadows: false, labels: 260, trees: 0.8, furniture: 1, rain: true },
-  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true },
+  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false, lamps: false },
+  medium: { dpr: 1.45, shadows: false, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true },
+  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true, lamps: true },
 };
 const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
 let quality = coarseQuery.matches || weak ? 'low' : 'medium';
@@ -155,6 +155,10 @@ let gait = 0;
 let groundMat = null;
 let waterMat = null;
 let lampMat = null;
+let poiMarks = [];
+let lampLights = [];
+let waterPoints = [];
+let intro = 0;
 let furniture = null;
 let trolleys = null;
 let places = null;
@@ -187,7 +191,7 @@ const api = {
     return { phase: bob, gait, moving: gait > 0.45 };
   },
 };
-window.__usti = api;
+if (import.meta.env.DEV) window.__usti = api;
 
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -265,6 +269,11 @@ document.addEventListener('mousemove', (event) => {
 canvas.addEventListener('wheel', (event) => {
   if (!playing || overview?.isOpen()) return;
   event.preventDefault();
+  if (photoMode) {
+    camera.fov = Math.min(78, Math.max(32, camera.fov + Math.sign(event.deltaY) * 1.6));
+    camera.updateProjectionMatrix();
+    return;
+  }
   camBack = Math.min(22, Math.max(2.6, camBack + Math.sign(event.deltaY) * 0.7));
 }, { passive: false });
 
@@ -434,15 +443,27 @@ function goHome() {
 
 function climbLookout(poi) {
   let best = null;
-  for (let dx = -40; dx <= 28; dx += 4) {
-    for (let dz = -12; dz <= 36; dz += 4) {
+  for (let dx = -36; dx <= 36; dx += 3) {
+    for (let dz = 16; dz <= 62; dz += 3) {
       const x = poi.x + dx;
       const z = poi.z + dz;
+      if (!collision || walkBlocked(collision, x, z, player.radius)) continue;
+      let clear = true;
+      for (let step = 3; step <= 15; step += 3) {
+        if (walkBlocked(collision, x, z + step, 0.35)) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) continue;
       const h = terrain.sample(x, z);
-      if (!best || h > best.h) best = { x, z, h };
+      const score = h + dz * 0.2 - Math.abs(dx) * 0.05;
+      if (!best || score > best.score) best = { x, z, score };
     }
   }
-  if (best) placeNear(best.x, best.z, Math.PI, -0.28);
+  if (best) placeNear(best.x, best.z, Math.PI, -0.32);
+  else placeNear(poi.x, poi.z + 28, Math.PI, -0.32);
+  camBack = 6.2;
   closePoi();
 }
 
@@ -471,11 +492,11 @@ function limbBox(width, height, depth, material) {
 }
 
 function makePerson() {
-  const skin = new THREE.MeshLambertMaterial({ color: 0xd2a679 });
-  const hair = new THREE.MeshLambertMaterial({ color: 0x3a2c24 });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x3c6eae });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2a3644 });
-  const shoes = new THREE.MeshLambertMaterial({ color: 0x241c18 });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xb98b62 });
+  const hair = new THREE.MeshLambertMaterial({ color: 0x2a211c });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x2a4660 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x1b242c });
+  const shoes = new THREE.MeshLambertMaterial({ color: 0x161311 });
   const group = new THREE.Group();
   group.name = 'person';
   const torso = limbBox(0.36, 0.46, 0.18, shirt);
@@ -664,6 +685,7 @@ function applyQuality(level) {
   if (api.trees?.trunks) api.trees.trunks.count = Math.max(0, Math.floor(api.trees.trunks.userData.fullCount * preset.trees));
   if (api.trees?.canopy) api.trees.canopy.count = Math.max(0, Math.floor(api.trees.canopy.userData.fullCount * preset.trees));
   furniture?.setDensity(preset.furniture);
+  trolleys?.setEnabled(quality !== 'low');
   const select = document.querySelector('#quality');
   if (select) select.value = quality;
   resize();
@@ -691,6 +713,7 @@ function setPhoto(next) {
   photoMode = next;
   document.body.classList.toggle('photo', photoMode);
   document.querySelector('#photo-bar').hidden = !photoMode;
+  if (!photoMode) document.querySelector('#thirds').hidden = true;
   if (photoMode) {
     document.exitPointerLock();
     closeMenu();
@@ -757,6 +780,8 @@ function refreshWalkHud(now) {
   if (!places || now - hudAt < 180) return;
   hudAt = now;
   whereEl.textContent = places.whereText(player.x, player.z);
+  const byWater = waterPoints.some((point) => Math.hypot(point.x - player.x, point.z - player.z) < 42);
+  ambience.presence(byWater);
   const near = places.nearPoi(player.x, player.z);
   actionsEl.textContent = coarse
     ? near
@@ -769,7 +794,7 @@ function refreshWalkHud(now) {
   if (goalMark) {
     goalMark.visible = Boolean(goal);
     if (goal) {
-      const y = terrain.sample(goal.poi.x, goal.poi.z) + 6 + Math.sin(now / 280) * 0.25;
+      const y = terrain.sample(goal.poi.x, goal.poi.z) + 3.1 + Math.sin(now / 280) * 0.15;
       goalMark.position.set(goal.poi.x, y, goal.poi.z);
     }
   }
@@ -801,43 +826,99 @@ function setProgress(ratio, step) {
   statusEl.textContent = step;
 }
 
-function addGround(texture, grid) {
+function addGround(texture, grid, pavingTex) {
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1;
-  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
+  const anisotropy = renderer.capabilities.getMaxAnisotropy() || 8;
+  texture.anisotropy = anisotropy;
   texture.needsUpdate = true;
+  const pave = pavingTex || new THREE.DataTexture(new Uint8Array([190, 184, 174, 255]), 1, 1);
+  pave.colorSpace = THREE.SRGBColorSpace;
+  pave.wrapS = THREE.RepeatWrapping;
+  pave.wrapT = THREE.RepeatWrapping;
+  pave.anisotropy = anisotropy;
+  pave.generateMipmaps = true;
+  pave.needsUpdate = true;
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
   const rows = grid.height;
-  const positions = new Float32Array(cols * rows * 3);
-  const uvs = new Float32Array(cols * rows * 2);
-  let p = 0;
-  let u = 0;
-  for (let r = 0; r < rows; r++) {
-    const zn = 1 - r / (rows - 1);
-    const z = minZ + zn * (maxZ - minZ);
-    for (let c = 0; c < cols; c++) {
-      const xn = c / (cols - 1);
-      const x = minX + xn * (maxX - minX);
-      positions[p++] = x;
-      positions[p++] = grid.sample(x, z);
-      positions[p++] = z;
-      uvs[u++] = xn;
-      uvs[u++] = zn;
+  const cellCols = cols - 1;
+  const cellRows = rows - 1;
+  const refined = new Uint8Array(cellCols * cellRows);
+  const at = (c, r) => {
+    const xn = c / cellCols;
+    const zn = 1 - r / cellRows;
+    return [minX + xn * (maxX - minX), minZ + zn * (maxZ - minZ), xn, zn];
+  };
+  for (let r = 0; r < cellRows; r++) {
+    for (let c = 0; c < cellCols; c++) {
+      let hot = grid.weight(at(c + 0.5, r + 0.5)[0], at(c + 0.5, r + 0.5)[1]) > 0.35;
+      if (!hot) {
+        for (const [cc, rr] of [[c, r], [c + 1, r], [c, r + 1], [c + 1, r + 1]]) {
+          const [x, z] = at(cc, rr);
+          if (grid.weight(x, z) > 0.35) hot = true;
+        }
+      }
+      if (hot) refined[r * cellCols + c] = 1;
     }
   }
+  const on = (r, c) => r >= 0 && c >= 0 && r < cellRows && c < cellCols && refined[r * cellCols + c] === 1;
+  const positions = [];
+  const uvs = [];
   const indices = [];
-  for (let r = 0; r < rows - 1; r++) {
-    for (let c = 0; c < cols - 1; c++) {
-      const i = r * cols + c;
-      indices.push(i, i + cols, i + 1, i + 1, i + cols, i + cols + 1);
+  const indexOf = new Map();
+  const vert = (key, x, z, xn, zn) => {
+    let index = indexOf.get(key);
+    if (index == null) {
+      index = positions.length / 3;
+      indexOf.set(key, index);
+      positions.push(x, grid.sample(x, z), z);
+      uvs.push(xn, zn);
+    }
+    return index;
+  };
+  const corner = (c, r) => {
+    const [x, z, xn, zn] = at(c, r);
+    return vert(`g:${c}:${r}`, x, z, xn, zn);
+  };
+  const mid = (key, c0, r0, c1, r1) => {
+    const [x0, z0, u0, v0] = at(c0, r0);
+    const [x1, z1, u1, v1] = at(c1, r1);
+    return vert(key, (x0 + x1) / 2, (z0 + z1) / 2, (u0 + u1) / 2, (v0 + v1) / 2);
+  };
+  for (let r = 0; r < cellRows; r++) {
+    for (let c = 0; c < cellCols; c++) {
+      const hot = on(r, c);
+      const midN = hot || on(r - 1, c);
+      const midS = hot || on(r + 1, c);
+      const midW = hot || on(r, c - 1);
+      const midE = hot || on(r, c + 1);
+      const p00 = corner(c, r);
+      const p10 = corner(c + 1, r);
+      const p01 = corner(c, r + 1);
+      const p11 = corner(c + 1, r + 1);
+      if (!hot && !midN && !midS && !midW && !midE) {
+        indices.push(p00, p01, p10, p10, p01, p11);
+        continue;
+      }
+      const boundary = [p00];
+      if (midW) boundary.push(mid(`v:${c}:${r}`, c, r, c, r + 1));
+      boundary.push(p01);
+      if (midS) boundary.push(mid(`h:${c}:${r + 1}`, c, r + 1, c + 1, r + 1));
+      boundary.push(p11);
+      if (midE) boundary.push(mid(`v:${c + 1}:${r}`, c + 1, r, c + 1, r + 1));
+      boundary.push(p10);
+      if (midN) boundary.push(mid(`h:${c}:${r}`, c, r, c + 1, r));
+      const [cx, cz, cu, cv] = at(c + 0.5, r + 0.5);
+      const center = vert(`c:${c}:${r}`, cx, cz, cu, cv);
+      for (let i = 0; i < boundary.length; i++) indices.push(center, boundary[i], boundary[(i + 1) % boundary.length]);
     }
   }
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const normals = geometry.attributes.normal.array;
@@ -847,6 +928,42 @@ function addGround(texture, grid) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
   groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide });
+  const texel = new THREE.Vector2(1 / Math.max(1, texture.image?.width || 3605), 1 / Math.max(1, texture.image?.height || 2733));
+  groundMat.onBeforeCompile = (shader) => {
+    shader.uniforms.paveMap = { value: pave };
+    shader.uniforms.uHasPave = { value: pavingTex ? 1 : 0 };
+    shader.uniforms.uTexel = { value: texel };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;\nvarying vec2 vGround;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <map_pars_fragment>',
+        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;',
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        vec3 blur = (
+          texture2D(map, vMapUv + vec2(uTexel.x, 0.0)).rgb +
+          texture2D(map, vMapUv - vec2(uTexel.x, 0.0)).rgb +
+          texture2D(map, vMapUv + vec2(0.0, uTexel.y)).rgb +
+          texture2D(map, vMapUv - vec2(0.0, uTexel.y)).rgb
+        ) * 0.25;
+        vec3 photo = diffuseColor.rgb;
+        vec3 sharp = clamp(photo + (photo - blur) * 0.95, 0.0, 1.0);
+        float luma = dot(sharp, vec3(0.30, 0.55, 0.15));
+        float green = sharp.g - max(sharp.r, sharp.b);
+        float pale = smoothstep(0.28, 0.48, luma);
+        vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
+        float nearMix = 1.0 - smoothstep(8.0, 46.0, vCamDist);
+        float stone = smoothstep(0.18, 0.34, luma) * (1.0 - smoothstep(0.008, 0.04, green));
+        vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
+        diffuseColor.rgb = mix(photo, settled, nearMix);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(stones, settled, 0.22), nearMix * stone * uHasPave * 0.9);`,
+      );
+  };
+  groundMat.customProgramCacheKey = () => 'usti-ground-v3';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -897,6 +1014,11 @@ function reveal() {
     const stop = places?.currentStop();
     if (stop) placeNear(stop.poi.x, stop.poi.z);
     wantTour = false;
+    intro = 0;
+  } else {
+    intro = 1;
+    camBack = 16.5;
+    player.pitch = -0.7;
   }
 }
 
@@ -942,6 +1064,19 @@ document.querySelector('#hud-btn').addEventListener('click', () => setClean(!cle
 document.querySelector('#restore').addEventListener('click', () => setClean(false));
 document.querySelector('#photo-btn').addEventListener('click', () => setPhoto(true));
 document.querySelector('#photo-exit').addEventListener('click', () => setPhoto(false));
+document.querySelector('#photo-thirds').addEventListener('click', () => {
+  const thirds = document.querySelector('#thirds');
+  thirds.hidden = !thirds.hidden;
+});
+document.querySelector('#share-btn').addEventListener('click', async () => {
+  const url = location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    statusEl.textContent = 'Odkaz na výhled je ve schránce.';
+  } catch {
+    statusEl.textContent = url;
+  }
+});
 document.querySelector('#photo-save').addEventListener('click', () => {
   renderer.render(scene, camera);
   const link = document.createElement('a');
@@ -965,6 +1100,58 @@ hourShiftEl.addEventListener('input', () => {
   hourShift = Number(hourShiftEl.value);
 });
 
+function updatePoiMarks() {
+  const camX = -camera.position.x;
+  const camZ = camera.position.z;
+  for (const mark of poiMarks) {
+    const nearPlayer = Math.hypot(player.x - mark.x, player.z - mark.z);
+    const nearCam = Math.hypot(camX - mark.x, camZ - mark.z);
+    mark.pin.visible = nearPlayer > 14 && nearCam > 14 && nearPlayer < 160;
+  }
+}
+
+function updateLampLights(night) {
+  const allow = PRESETS[quality].lamps && night > 0.4;
+  const strength = allow ? Math.min(1, (night - 0.4) / 0.35) : 0;
+  const nearest = (furniture?.lamps || [])
+    .map((lamp) => ({ lamp, dist: (lamp.x - player.x) ** 2 + (lamp.z - player.z) ** 2 }))
+    .sort((a, b) => a.dist - b.dist);
+  const nearStreet = nearest.filter((item) => item.dist < 75 * 75).slice(0, lampLights.length);
+  lampLights.forEach((entry, index) => {
+    const hit = nearStreet[index];
+    if (!hit || strength <= 0) {
+      entry.light.intensity = 0;
+      entry.glow.visible = false;
+      return;
+    }
+    entry.light.position.set(hit.lamp.x, hit.lamp.y + 4.2, hit.lamp.z);
+    entry.light.intensity = 2.4 * strength;
+    entry.glow.position.set(hit.lamp.x, hit.lamp.y + 0.2, hit.lamp.z);
+    entry.glow.visible = true;
+  });
+  if (lampLights[0]) lampLights[0].glowMat.opacity = 0.22 * strength;
+}
+
+function collectWater(water, projector) {
+  const points = [];
+  for (const feature of water?.features || []) {
+    const geometry = feature.geometry;
+    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
+    for (const ring of rings) {
+      if (!ring?.length) continue;
+      let lon = 0;
+      let lat = 0;
+      for (const [lo, la] of ring) {
+        lon += lo;
+        lat += la;
+      }
+      const [x, z] = projector.toLocal(lon / ring.length, lat / ring.length);
+      points.push({ x, z });
+    }
+  }
+  return points;
+}
+
 function timeNow() {
   return new Date(Date.now() + (realClock ? 0 : hourShift) * 3600000);
 }
@@ -973,28 +1160,93 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, clock.getDelta());
   if (playing && !overlayBlocks()) updatePlayer(dt);
+  if (playing && intro > 0) {
+    if (keys.size || Math.abs(stickX) > 0.05 || Math.abs(stickY) > 0.05) intro = 0;
+    else {
+      intro = Math.max(0, intro - dt / 2.6);
+      const blend = 1 - intro * intro;
+      camBack = 16.5 + (8.2 - 16.5) * blend;
+      player.pitch = -0.7 + 0.3 * blend;
+    }
+  }
   updateCamera();
+  let nightNow = 0;
   if (daylight) {
     const skyState = daylight.update(player, { when: timeNow(), weather, allowRain: PRESETS[quality].rain });
+    nightNow = skyState.night;
     if (playing) {
       clockEl.textContent = skyState.clock;
       document.querySelector('#menu-clock').textContent = skyState.clock;
-      if (groundMat) groundMat.color.setScalar(1 - skyState.night * 0.22);
+      if (groundMat) groundMat.color.setScalar((1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1));
       if (waterMat) {
-        waterMat.opacity = skyState.wet ? 0.84 : 0.72;
+        waterMat.opacity = skyState.wet ? 0.86 : 0.72;
         waterMat.color.set(skyState.wet ? 0x123f52 : 0x1a6d88);
+        waterMat.shininess = skyState.night > 0.45 ? 64 : 18;
+        waterMat.specular.set(skyState.night > 0.45 ? 0xd5eef6 : 0xb7dbe6);
       }
-      if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.62 ? 1.2 : 0.05;
+      if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.4 ? 2.6 : 0.22;
+      nightGlow.value = skyState.night > 0.45 ? 0.9 : 0;
     }
   }
+  if (playing) updatePoiMarks();
+  updateLampLights(nightNow);
   if (trolleys && playing) trolleys.update(dt);
-  if (playing) updateLabels(labels, camera, { maxDist: PRESETS[quality].labels, hide: clean || photoMode });
+  if (playing) {
+    updateLabels(labels, camera, {
+      maxDist: PRESETS[quality].labels,
+      hide: clean || photoMode,
+      blockers: hudRects(['#dock', '#touch', '#mini', '#credit']),
+    });
+  }
   if (overview && playing) {
     overview.drawMini();
     if (overview.isOpen()) overview.drawMap();
   }
   if (playing) refreshWalkHud(now || performance.now());
   renderer.render(scene, camera);
+}
+
+function loadPublicTexture(url) {
+  return new Promise((resolve) => {
+    new THREE.TextureLoader().load(url, resolve, undefined, () => resolve(null));
+  });
+}
+
+function detailZones(water) {
+  const segments = [];
+  const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
+  const onEdge = (ax, az, bx, bz) => {
+    const near = (value, limit) => Math.abs(value - limit) < 1.4;
+    return (
+      (near(ax, projector.minX) && near(bx, projector.minX))
+      || (near(ax, projector.maxX) && near(bx, projector.maxX))
+      || (near(az, projector.minZ) && near(bz, projector.minZ))
+      || (near(az, projector.maxZ) && near(bz, projector.maxZ))
+    );
+  };
+  for (const feature of water?.features || []) {
+    if (feature.properties?.water !== 'river') continue;
+    const geometry = feature.geometry;
+    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
+    for (const ring of rings) {
+      if (!ring?.length) continue;
+      const local = ring.map(([lon, lat]) => projector.toLocal(lon, lat));
+      for (const part of clipPolyline(local, ...box)) {
+        for (let i = 1; i < part.length; i++) {
+          const a = part[i - 1];
+          const b = part[i];
+          if (onEdge(a[0], a[1], b[0], b[1])) continue;
+          segments.push(a[0], a[1], b[0], b[1]);
+        }
+      }
+    }
+  }
+  const [x0, z0] = projector.toLocal(14.036, 50.6544);
+  const [x1, z1] = projector.toLocal(14.0438, 50.6576);
+  return {
+    segments,
+    slope: { minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) },
+  };
 }
 
 async function boot() {
@@ -1007,8 +1259,8 @@ async function boot() {
     ['trees.geojson', true],
     ['pois.json', true],
     ['furniture.geojson', false],
-    ['routes.geojson', false],
   ];
+  if (quality !== 'low') jobs.push(['routes.geojson', false]);
   const got = new Map();
   let received = 0;
   const onProgress = (file, amount) => {
@@ -1036,8 +1288,19 @@ async function boot() {
     const extra = import.meta.env.DEV ? ' Ve složce aplikace spusťte npm run download.' : '';
     hintEl.textContent = `Ohraničení modelu nesedí s daty.${extra}`;
   }
-  terrain = makeTerrain(terrainGrid, projector);
-  addGround(texture, terrain);
+  let detail = null;
+  try {
+    const extra = await fetchBytes('terrain-detail.bin', onProgress);
+    const parsed = terrainDetailFromBin(extra.buffer.slice(extra.byteOffset, extra.byteOffset + extra.byteLength));
+    const zones = detailZones(loaded.water);
+    detail = { patches: parsed.patches, segments: zones.segments, slope: zones.slope };
+  } catch {
+    detail = null;
+  }
+  terrain = makeTerrain(terrainGrid, projector, detail);
+  const pavingTex = await loadPublicTexture('/textures/paving.jpg');
+  const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
+  addGround(texture, terrain, pavingTex);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1048,6 +1311,7 @@ async function boot() {
       trees: loaded.trees,
       startHint: area.startHint,
       terrain,
+      asphaltMap: asphaltTex,
     },
     projector,
     {
@@ -1062,12 +1326,23 @@ async function boot() {
   view.add(city.group);
   collision = city.collision;
   labels = city.labels;
+  const poiNames = new Set((loaded.pois?.features || []).map((poi) => poi.name));
+  for (const sprite of labels) {
+    if (poiNames.has(sprite.userData.text)) sprite.userData.poi = true;
+  }
   waterMat = city.waterMaterial;
   api.trees = city.trees;
   player.x = city.start.x;
   player.z = city.start.z;
   player.y = terrain.sample(player.x, player.z);
   player.yaw = city.start.yaw;
+  const aheadX = player.x - Math.sin(player.yaw) * 7;
+  const aheadZ = player.z - Math.cos(player.yaw) * 7;
+  if (!walkBlocked(collision, aheadX, aheadZ, player.radius)) {
+    player.x = aheadX;
+    player.z = aheadZ;
+    player.y = terrain.sample(player.x, player.z);
+  }
   api.start = city.start;
   const pois = (loaded.pois?.features || []).map((poi) => {
     const [x, z] = projector.toLocal(poi.lon, poi.lat);
@@ -1075,30 +1350,38 @@ async function boot() {
   });
   const poiGroup = new THREE.Group();
   poiGroup.name = 'pois';
+  const ringGeo = new THREE.RingGeometry(0.45, 0.68, 18);
+  const pinPole = new THREE.CylinderGeometry(0.03, 0.04, 1.05, 5);
+  const pinFlag = new THREE.BoxGeometry(0.36, 0.18, 0.03);
   for (const poi of pois) {
     const y = terrain.sample(poi.x, poi.z);
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.8, 6), new THREE.MeshLambertMaterial({ color: 0xd7a441 }));
-    pole.position.set(poi.x, y + 1.4, poi.z);
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 10, 8),
-      new THREE.MeshLambertMaterial({ color: 0xf0d78c, emissive: 0x8a6a20, emissiveIntensity: 0.35 }),
-    );
-    ball.position.set(poi.x, y + 2.9, poi.z);
-    pole.userData.noShadow = true;
-    ball.userData.noShadow = true;
-    poiGroup.add(pole, ball);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xf0d78c, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(poi.x, y + 0.16, poi.z);
+    const pin = new THREE.Group();
+    const pole = new THREE.Mesh(pinPole, new THREE.MeshLambertMaterial({ color: 0xc4923a }));
+    pole.position.y = 0.52;
+    const flag = new THREE.Mesh(pinFlag, new THREE.MeshLambertMaterial({ color: 0xf0d78c, emissive: 0x8a6a20, emissiveIntensity: 0.2 }));
+    flag.position.set(0.18, 0.95, 0);
+    pin.add(pole, flag);
+    pin.position.set(poi.x, y, poi.z);
+    pin.userData.noShadow = true;
+    ring.userData.noShadow = true;
+    poiGroup.add(ring, pin);
+    poiMarks.push({ pin, x: poi.x, z: poi.z });
     const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 45);
     if (!named) {
       const sprite = makeNameSprite(poi.name);
-      sprite.position.set(poi.x, y + 4.4, poi.z);
+      sprite.userData.poi = true;
+      sprite.position.set(poi.x, y + 2.4, poi.z);
       poiGroup.add(sprite);
       labels.push(sprite);
     }
   }
   view.add(poiGroup);
   goalMark = new THREE.Mesh(
-    new THREE.ConeGeometry(0.55, 1.3, 8),
-    new THREE.MeshLambertMaterial({ color: 0xf0c14e, emissive: 0x8a6420, emissiveIntensity: 0.45 }),
+    new THREE.ConeGeometry(0.28, 0.7, 7),
+    new THREE.MeshLambertMaterial({ color: 0xf0c14e, emissive: 0x8a6420, emissiveIntensity: 0.35 }),
   );
   goalMark.visible = false;
   goalMark.userData.noShadow = true;
@@ -1107,7 +1390,24 @@ async function boot() {
   lampMat = furniture.lampMat;
   addBridgeMarks(view, loaded.highways, projector, terrain.sample.bind(terrain));
   addVetruseMark(view, projector, terrain.sample.bind(terrain));
-  trolleys = addTrolleys(view, loaded.routes, projector, terrain.sample.bind(terrain));
+  trolleys = quality === 'low' ? null : addTrolleys(view, loaded.routes, projector, terrain.sample.bind(terrain));
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xffb15a,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  lampLights = Array.from({ length: 8 }, () => {
+    const light = new THREE.PointLight(0xffb15a, 0, 36, 1);
+    light.castShadow = false;
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(2.4, 16), glowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.userData.noShadow = true;
+    view.add(light, glow);
+    return { light, glow, glowMat };
+  });
+  waterPoints = collectWater(loaded.water, projector);
   places = createPlaces({ pois, labelPoints: city.labelPoints });
   const bounds = { minX: projector.minX, maxX: projector.maxX, minZ: projector.minZ, maxZ: projector.maxZ };
   overview = createOverview({
@@ -1119,6 +1419,8 @@ async function boot() {
     getPlayer: () => ({ x: player.x, z: player.z, yaw: player.yaw }),
     getWhere: () => places.whereText(player.x, player.z),
     getPois: () => places.pois.map((poi) => ({ ...poi, visited: places.visited.has(poi.id) })),
+    getLabels: () => city.labelPoints,
+    getGoal: () => places.currentStop()?.poi || null,
     search: (query) => places.search(query),
     onTeleport: (x, z) => {
       placeNear(x, z);
