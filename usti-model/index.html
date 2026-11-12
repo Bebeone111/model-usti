@@ -2,26 +2,194 @@
 <html lang="cs">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Pěší 3D procházka centrem Ústí nad Labem. Budovy a ulice z OpenStreetMap, terén a letecký snímek ČÚZK." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Model Ústí — centrum" />
+    <meta property="og:description" content="Pěší 3D procházka centrem Ústí nad Labem podle OpenStreetMap a dat ČÚZK." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og.jpg" />
+    <meta property="og:image:alt" content="Pohled na model centra Ústí nad Labem" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Model Ústí — centrum</title>
   </head>
   <body>
-    <canvas id="view"></canvas>
+    <canvas id="view" role="img" aria-label="Trojrozměrný model centra Ústí nad Labem. Chůze klávesami W, A, S, D, na telefonu páčkou."></canvas>
     <div id="hud">
       <h1 id="title">Model Ústí — centrum</h1>
-      <p id="hint">WASD — chůze · Shift — rychlý přesun · myš — rozhlížení · kliknutí zamkne kurzor · Esc — uvolnit</p>
-      <p id="status">Načítám data…</p>
+      <p id="where">centrum</p>
+      <p id="clock"></p>
+      <p id="hint"></p>
+      <p id="actions"></p>
+      <p id="status" aria-live="polite">Načítám data…</p>
     </div>
-    <p id="credit">© přispěvatelé OpenStreetMap (ODbL) · ortofoto a DMR 5G © ČÚZK (CC BY 4.0)</p>
+    <div id="dock">
+      <button type="button" id="open-map">Mapa</button>
+      <button type="button" id="open-menu">Menu</button>
+      <button type="button" id="open-help">Nápověda</button>
+    </div>
+    <canvas id="mini" width="256" height="256" aria-hidden="true"></canvas>
+    <p id="credit">
+      © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">přispěvatelé OpenStreetMap</a> (ODbL)
+      · ortofoto a DMR 5G © <a href="https://cuzk.gov.cz/" target="_blank" rel="noopener">ČÚZK</a> (CC BY 4.0)
+    </p>
+    <button type="button" id="restore" hidden>Zobrazit ovládání</button>
     <div id="touch">
       <div id="stick-wrap">
         <span id="stick-label">Chůze</span>
         <div id="stick"><div id="stick-knob"></div></div>
       </div>
+      <button type="button" id="sprint">Rychle</button>
       <div id="speed">
-        <span id="speed-value">3,6 m/s</span>
-        <input id="speed-range" type="range" min="1" max="16" step="0.1" value="3.6" />
+        <div id="touch-actions">
+          <button type="button" id="poi-btn">Místo</button>
+          <button type="button" id="map-btn">Mapa</button>
+          <button type="button" id="menu-btn">Menu</button>
+        </div>
+        <label id="speed-label" for="speed-range">Rychlost chůze <span id="speed-value">3,6 m/s</span></label>
+        <input id="speed-range" type="range" min="1" max="16" step="0.1" value="3.6" aria-valuemin="1" aria-valuemax="16" />
       </div>
+    </div>
+
+    <section id="start">
+      <div class="card">
+        <p class="eyebrow">Ústí nad Labem</p>
+        <h1>Model Ústí — centrum</h1>
+        <p>Stylizovaná pěší procházka centrem. Domy, ulice a jména jsou z OpenStreetMap, terén a letecký snímek z ČÚZK.</p>
+        <p>Začíná se na Mírovém náměstí. Nic se neřídí, jen se chodí.</p>
+        <div class="row">
+          <button type="button" id="enter">Vstoupit</button>
+          <button type="button" id="about-btn" class="ghost">O modelu</button>
+          <button type="button" id="tour-start" class="ghost">Prohlídka</button>
+        </div>
+        <div id="start-progress" hidden>
+          <div class="bar"><span id="start-bar"></span></div>
+          <p id="start-step">Připravuji model…</p>
+        </div>
+        <div id="about" hidden>
+          <p>Oblast je historické centrum mezi řekou a Mariánskou skálou. Výšky domů berou značku height, jinak počet podlaží, jinak odhad. Kolize je jen proti půdorysu.</p>
+          <p>Na počítači se chodí klávesami W A S D, Shift je rychlejší chůze, myš se rozhlíží a kolečko mění odstup kamery. Na telefonu je páčka, tah po obrazu a posuvník rychlosti.</p>
+          <p id="about-weather">Počasí, pokud je dostupné: Weather data by Open-Meteo.com (CC BY 4.0).</p>
+        </div>
+        <p id="gl-fail" hidden>Prohlížeč nevytvořil WebGL, model se nemůže zobrazit. Zkuste jiný prohlížeč nebo zapněte hardwarovou akceleraci.</p>
+        <p class="fine">
+          © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)
+          · © <a href="https://cuzk.gov.cz/">ČÚZK</a> (CC BY 4.0)
+        </p>
+      </div>
+    </section>
+
+    <section id="loading" hidden>
+      <div class="card">
+        <h2>Načítám centrum</h2>
+        <div class="bar"><span id="load-bar"></span></div>
+        <p id="load-pct">0 %</p>
+        <p id="load-step">Mapa centra</p>
+        <p class="fine">© OpenStreetMap (ODbL) · © ČÚZK (CC BY 4.0)</p>
+      </div>
+    </section>
+
+    <section id="help" hidden>
+      <div class="card">
+        <h2>Jak se chodí</h2>
+        <div id="help-desktop">
+          <ul class="keys">
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> chůze, i bez zamčené myši</li>
+            <li><kbd>Shift</kbd> rychlejší chůze, asi čtyřnásobek</li>
+            <li><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> otáčení pohledu</li>
+            <li>myš rozhlíží, kliknutí kurzor zamkne, <kbd>Esc</kbd> ho pustí</li>
+            <li>kolečko mění odstup kamery</li>
+            <li><kbd>V</kbd> první a třetí osoba</li>
+            <li><kbd>M</kbd> mapa, <kbd>E</kbd> karta místa, <kbd>Mezerník</kbd> kde jsem</li>
+            <li><kbd>G</kbd> kvalita, <kbd>H</kbd> skrýt popisky, <kbd>P</kbd> fotografie</li>
+            <li><kbd>Tab</kbd> nebo <kbd>?</kbd> tahle nápověda</li>
+          </ul>
+        </div>
+        <div id="help-mobile">
+          <ul class="keys">
+            <li>Páčka vlevo chodí, tah po obrazu se rozhlíží.</li>
+            <li>Posuvník je rychlost chůze. Tlačítko Rychle je asi čtyřnásobek.</li>
+            <li>Dva prsty mění odstup kamery. Na mapě dva prsty posouvají a přibližují.</li>
+            <li>Žluté tlačítko Místo otevře kartu, když stojíte u značky.</li>
+            <li>Mapa umí hledat ulici a vrátit vás na Mírové náměstí.</li>
+          </ul>
+        </div>
+        <button type="button" id="help-close">Rozumím</button>
+      </div>
+    </section>
+
+    <section id="menu" hidden>
+      <div class="card">
+        <h2>Menu</h2>
+        <label>Kvalita obrazu
+          <select id="quality">
+            <option value="low">Nízká</option>
+            <option value="medium">Střední</option>
+            <option value="high">Vysoká</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="real-time" checked /> Skutečný čas (Evropa/Praha)</label>
+        <label>Posun hodin
+          <input id="hour-shift" type="range" min="-12" max="12" step="1" value="0" disabled />
+        </label>
+        <p id="menu-clock"></p>
+        <div class="row">
+          <button type="button" id="sound-btn">Zapnout zvuk okolí</button>
+          <button type="button" id="hud-btn">Skrýt HUD a popisky</button>
+          <button type="button" id="photo-btn">Fotografický režim</button>
+          <button type="button" id="tour-btn">Prohlídka centra</button>
+          <button type="button" id="home-btn">Zpět na Mírové náměstí</button>
+          <button type="button" id="view-btn">První osoba</button>
+        </div>
+        <p id="menu-visited">Navštíveno 0 / 12</p>
+        <p id="weather-credit" hidden>Weather data by Open-Meteo.com (CC BY 4.0)</p>
+        <button type="button" id="menu-close">Zavřít</button>
+      </div>
+    </section>
+
+    <section id="map" hidden>
+      <canvas id="map-canvas" aria-label="Mapa centra"></canvas>
+      <div id="map-panel">
+        <div class="row">
+          <input id="map-search" type="search" placeholder="Ulice nebo místo" aria-label="Hledat ulici nebo místo" />
+          <button type="button" id="map-close">Zavřít</button>
+        </div>
+        <ul id="map-results"></ul>
+        <p id="map-here">Jsi tady</p>
+        <p id="map-scale">100 m</p>
+        <ul id="map-legend">
+          <li><i class="swatch road"></i> silnice</li>
+          <li><i class="swatch foot"></i> pěší</li>
+          <li><i class="swatch water"></i> voda</li>
+          <li><i class="swatch you"></i> vy</li>
+          <li><i class="swatch poi"></i> místo</li>
+        </ul>
+        <p id="map-visited">Navštíveno 0 / 12</p>
+        <div class="row">
+          <button type="button" id="map-home">Zpět na Mírové náměstí</button>
+          <button type="button" id="map-me">Kde jsem</button>
+          <button type="button" id="map-tour">Prohlídka</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="poi" hidden>
+      <article class="card">
+        <h2 id="poi-name"></h2>
+        <p id="poi-text"></p>
+        <p><a id="poi-link" target="_blank" rel="noopener" hidden>Otevřít na mapě OSM</a></p>
+        <div class="row">
+          <button type="button" id="poi-lookout" hidden>Vyjít na vyhlídku</button>
+          <button type="button" id="poi-next" hidden>Další zastávka</button>
+          <button type="button" id="poi-cancel" hidden>Zrušit prohlídku</button>
+          <button type="button" id="poi-close">Zavřít</button>
+        </div>
+      </article>
+    </section>
+
+    <div id="photo-bar" hidden>
+      <button type="button" id="photo-save">Uložit snímek</button>
+      <button type="button" id="photo-exit">Zpět</button>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

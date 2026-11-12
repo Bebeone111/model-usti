@@ -1,3 +1,19 @@
+export function terrainFromBin(buffer) {
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'HDEM') throw new Error('Soubor terénu není ve známém formátu.');
+  const width = view.getUint16(4, true);
+  const height = view.getUint16(6, true);
+  const elevMin = view.getFloat32(8, true);
+  const elevMax = view.getFloat32(12, true);
+  const count = width * height;
+  const heights = new Float32Array(count);
+  const span = elevMax - elevMin || 1;
+  const header = 20;
+  for (let i = 0; i < count; i++) heights[i] = elevMin + (view.getUint16(header + i * 2, true) / 65535) * span;
+  return { width, height, elevMin, elevMax, heights, source: 'ČÚZK DMR 5G' };
+}
+
 export function makeTerrain(grid, projector) {
   const width = grid.width;
   const height = grid.height;

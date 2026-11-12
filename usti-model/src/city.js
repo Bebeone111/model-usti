@@ -316,8 +316,15 @@ function midpointOf(part) {
   return { len, x: part[0][0], z: part[0][1] };
 }
 
+function niceName(text) {
+  return String(text || '')
+    .trim()
+    .replace('Městský čast', 'Městský část')
+    .replace('C´UP', "C'UP");
+}
+
 function rememberLine(store, name, part, sample, lift) {
-  const text = String(name || '').trim();
+  const text = niceName(name);
   if (!text || text === 'Elbe') return;
   const mid = midpointOf(part);
   if (!mid) return;
@@ -339,7 +346,7 @@ function roundRect(ctx, x, y, w, h, r) {
 function labelTexture(text) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const family = '"Liberation Sans", "Noto Sans", "DejaVu Sans", sans-serif';
+  const family = 'system-ui, sans-serif';
   let px = 54;
   ctx.font = `700 ${px}px ${family}`;
   let width = Math.ceil(ctx.measureText(text).width + 48);
@@ -364,6 +371,19 @@ function labelTexture(text) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.userData = { aspect: width / height };
   return texture;
+}
+
+export function makeNameSprite(text) {
+  const map = labelTexture(niceName(text));
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, depthTest: false, fog: false }),
+  );
+  sprite.center.set(0.5, 0);
+  sprite.renderOrder = 12;
+  sprite.userData.aspect = map.userData.aspect;
+  sprite.userData.text = niceName(text);
+  sprite.scale.set(map.userData.aspect * 4, 4, 1);
+  return sprite;
 }
 
 function facadeOnBeforeCompile(shader) {
@@ -446,7 +466,7 @@ function facadeMaterial(color) {
 }
 
 const CAFE_GARDEN = {
-  name: 'C´UP - coffeeup',
+  name: "C'UP",
   // Palachova side of the house, in the strip between that wall and the roadway.
   lon: 14.0274680,
   lat: 50.6657236,
@@ -769,7 +789,7 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   for (const feature of data.landuse?.features || []) {
     if (feature.properties?.landuse === 'forest') scatterArea(feature, 11);
   }
-  if (!points.length) return 0;
+  if (!points.length) return { count: 0, trunks: null, canopy: null };
   const greens = [0x2e6b34, 0x3d7c3c, 0x4d8c42, 0x255e30, 0x5a9346];
   const trunks = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.1, 0.16, 1, 5).translate(0, 0.5, 0),
@@ -806,10 +826,16 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   grove.name = 'trees';
   grove.add(trunks, canopy);
   group.add(grove);
-  return points.length;
+  trunks.userData.fullCount = points.length;
+  canopy.userData.fullCount = points.length;
+  return { count: points.length, trunks, canopy };
 }
 
-export function buildCity(data, projector) {
+export async function buildCity(data, projector, hooks = {}) {
+  const tick = async (phase, done, total) => {
+    if (!hooks.onSlice) return;
+    await hooks.onSlice({ phase, done, total });
+  };
   const { buildings, highways, water } = data;
   const sample = data.terrain?.sample || (() => 0);
   const roads = buildRoadGeometry(highways.features || [], projector);
@@ -836,7 +862,7 @@ export function buildCity(data, projector) {
     const colorKey = String(tags.osmId ?? tags.name ?? '');
     const wallIndex = hashId(colorKey) % WALLS.length;
     const roofIndex = hashId(`${colorKey}:roof`) % ROOFS.length;
-    const name = String(tags.name || '').trim();
+    const name = niceName(tags.name);
     let placed = false;
     eachPolygon(feature.geometry, (coords) => {
       if (!coords?.[0]) return;
@@ -900,6 +926,9 @@ export function buildCity(data, projector) {
     });
     if (placed) stats.buildings += 1;
     else stats.skippedBuildings += 1;
+    if (stats.buildings > 0 && stats.buildings % 40 === 0) {
+      await tick('buildings', stats.buildings, (buildings.features || []).length);
+    }
   }
 
   drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
@@ -926,7 +955,7 @@ export function buildCity(data, projector) {
       }
       const flat = triangulate(densify(outer.concat([outer[0]]), 12).slice(0, -1), holes.map((hole) => densify(hole.concat([hole[0]]), 12).slice(0, -1)), 0, 1);
       if (flat) {
-        waterParts.push(conformSurface(flat, sample, 0.22));
+        waterParts.push(conformSurface(flat, sample, 0.1));
         stats.water += 1;
       }
       if (tags.name && feature.geometry?.type !== 'LineString') {
@@ -950,7 +979,7 @@ export function buildCity(data, projector) {
   const [startX, startZ] = data.startHint ? projector.toLocal(data.startHint.lon, data.startHint.lat) : [0, 0];
   for (const feature of data.landuse?.features || []) {
     const tags = feature.properties || {};
-    const name = String(tags.name || '').trim();
+    const name = niceName(tags.name);
     if (!PARKISH.has(tags.landuse)) continue;
     let best = null;
     eachPolygon(feature.geometry, (coords) => {
@@ -971,6 +1000,7 @@ export function buildCity(data, projector) {
     if (best) areaLabels.push({ text: name, ...best });
   }
 
+  await tick('merge', 1, 2);
   const group = new THREE.Group();
   group.name = 'city';
 
@@ -1025,7 +1055,10 @@ export function buildCity(data, projector) {
       new THREE.Mesh(
         paving,
         new THREE.MeshLambertMaterial({
-          color: 0xe2c27a,
+          color: 0xd5d0c6,
+          transparent: true,
+          opacity: 0.16,
+          depthWrite: false,
           side: THREE.FrontSide,
           polygonOffset: true,
           polygonOffsetFactor: -2,
@@ -1050,21 +1083,24 @@ export function buildCity(data, projector) {
     );
   }
   const waterMesh = geometryFromParts(waterParts);
+  let waterMaterial = null;
   if (waterMesh) {
-    group.add(
-      new THREE.Mesh(
-        waterMesh,
-        new THREE.MeshLambertMaterial({
-          color: 0x1b6f90,
-          emissive: 0x0b3344,
-          emissiveIntensity: 0.35,
-          transparent: true,
-          opacity: 0.82,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        }),
-      ),
-    );
+    waterMaterial = new THREE.MeshPhongMaterial({
+      color: 0x1a6d88,
+      specular: 0xb7dbe6,
+      shininess: 18,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const waterObject = new THREE.Mesh(waterMesh, waterMaterial);
+    waterObject.name = 'water';
+    waterObject.userData.noShadow = true;
+    group.add(waterObject);
   }
 
   const labelPoints = [];
@@ -1080,7 +1116,7 @@ export function buildCity(data, projector) {
       textures.set(text, map);
     }
     const sprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, depthTest: true, fog: false }),
+      new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, depthTest: false, fog: false }),
     );
     sprite.position.set(x, y, z);
     sprite.center.set(0.5, 0);
@@ -1091,7 +1127,9 @@ export function buildCity(data, projector) {
     group.add(sprite);
   };
 
-  stats.trees = addTrees(group, data, projector, sample, carriageways, blockers);
+  await tick('trees', 1, 1);
+  const trees = addTrees(group, data, projector, sample, carriageways, blockers);
+  stats.trees = trees.count;
   const cafe = addCafeGarden(group, sample, projector);
   if (cafe) place(cafe.name, cafe.x, cafe.y, cafe.z);
 
@@ -1103,7 +1141,7 @@ export function buildCity(data, projector) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints };
+  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial };
 }
 
 function makeCollision(blockers, projector) {

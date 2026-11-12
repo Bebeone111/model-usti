@@ -1,0 +1,99 @@
+{
+  "type": "FeatureCollection",
+  "name": "pois",
+  "features": [
+    {
+      "id": "namesti",
+      "name": "Mírové náměstí",
+      "lon": 14.040439,
+      "lat": 50.660244,
+      "text": "Hlavní náměstí Ústí nad Labem a výchozí bod procházky. Dnešní zástavba vyrostla po válce na místě staršího centra. Kolem jsou úřady, obchody a pěší plochy, pod kterými je vidět letecký snímek."
+    },
+    {
+      "id": "vetruse",
+      "name": "Větruše",
+      "lon": 14.039608,
+      "lat": 50.655013,
+      "osm": "https://www.openstreetmap.org/way/55855582",
+      "text": "Výletní restaurace a vyhlídka na kopci nad Labem, na jižním okraji modelu. Z terasy je vidět řeka, mosty i město. Tlačítko níže vás postaví na nejvyšší volné místo v okolí."
+    },
+    {
+      "id": "mariansky",
+      "name": "Mariánský most",
+      "lon": 14.05296,
+      "lat": 50.66107,
+      "osm": "https://www.openstreetmap.org/way/25734379",
+      "text": "Zavěšený most přes Labe na východě modelu, otevřený v roce 1998. Vede z centra směrem ke Střekovu. V modelu je zjednodušený pylon, ne fotografie mostu."
+    },
+    {
+      "id": "benes",
+      "name": "Most Dr. E. Beneše",
+      "lon": 14.04623,
+      "lat": 50.65989,
+      "osm": "https://www.openstreetmap.org/way/238162985",
+      "text": "Silniční most přes Labe z roku 1936, pojmenovaný po prezidentu Edvardu Benešovi. Spojuje centrum s pravým břehem u nádraží."
+    },
+    {
+      "id": "forum",
+      "name": "OC Forum",
+      "lon": 14.039911,
+      "lat": 50.658682,
+      "osm": "https://www.openstreetmap.org/way/52107614",
+      "text": "Obchodní centrum Forum jižně od Mírového náměstí. V OpenStreetMap je vedené jako velká budova u pěší zóny. V modelu má půdorys a výšku z mapy."
+    },
+    {
+      "id": "nadrazi",
+      "name": "Ústí nad Labem hlavní nádraží",
+      "lon": 14.044216,
+      "lat": 50.659685,
+      "osm": "https://www.openstreetmap.org/way/188090766",
+      "text": "Hlavní nádraží Ústí nad Labem na pravém břehu Labe. Je to železniční uzel, odkud prohlídka centra vychází směrem k náměstí."
+    },
+    {
+      "id": "zdar",
+      "name": "Palác Zdar",
+      "lon": 14.040139,
+      "lat": 50.660692,
+      "osm": "https://www.openstreetmap.org/way/63469970",
+      "text": "Dům na Mírovém náměstí. V modelu má výšku podle OpenStreetMap a stojí v zástavbě náměstí mezi ostatními domy."
+    },
+    {
+      "id": "magistrat",
+      "name": "Magistrát",
+      "lon": 14.037316,
+      "lat": 50.660386,
+      "osm": "https://www.openstreetmap.org/way/63470030",
+      "text": "Magistrát města Ústí nad Labem, úřad na západní straně centra nedaleko náměstí. Budova je v modelu podle půdorysu z OpenStreetMap."
+    },
+    {
+      "id": "pavel",
+      "name": "Chrám Apoštola Pavla",
+      "lon": 14.03658,
+      "lat": 50.66229,
+      "osm": "https://www.openstreetmap.org/way/95522479",
+      "text": "Evangelický chrám apoštola Pavla, zvaný červený kostel, stojí severozápadně od náměstí. Cihlovou věž v modelu zastupuje půdorys a výška z OpenStreetMap."
+    },
+    {
+      "id": "vojtech",
+      "name": "Kostel sv. Vojtěcha",
+      "lon": 14.042236,
+      "lat": 50.659081,
+      "osm": "https://www.openstreetmap.org/way/43529959",
+      "text": "Městský kostel svatého Vojtěcha východně od Mírového náměstí. Patří k starším bodům centra a v modelu zůstává z mapových dat."
+    },
+    {
+      "id": "soutok",
+      "name": "Soutok Labe a Bíliny",
+      "lon": 14.04355,
+      "lat": 50.6572,
+      "text": "Místo, kde se Bílina vlévá do Labe, na východě modelu mezi mosty. Řeky jsou odlišené barvou a na hladině je klidnější odlesk oblohy. Hrad Střekov leží dál na jihu, mimo tuhle procházku."
+    },
+    {
+      "id": "cup",
+      "name": "C'UP",
+      "lon": 14.027468,
+      "lat": 50.6657236,
+      "text": "Kavárna u domu U Nemocnice 1763/1, mezi zdí a ulicí Palachova. U stolu sedí osm hostů s hrnky. Jméno v modelu používá obyčejný apostrof."
+    }
+  ]
+}
