@@ -78,6 +78,11 @@ const player = {
 const keys = new Set();
 let camBack = 8.2;
 let pointerLocked = false;
+let walkSpeed = 3.6;
+let stickX = 0;
+let stickY = 0;
+const WALK_MIN = 1;
+const WALK_MAX = 16;
 
 const person = makePerson();
 const blob = new THREE.Mesh(
@@ -146,7 +151,12 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('keyup', (event) => keys.delete(event.code));
 window.addEventListener('blur', () => keys.clear());
 
+let lastPointer = 'mouse';
+canvas.addEventListener('pointerdown', (event) => {
+  lastPointer = event.pointerType;
+});
 canvas.addEventListener('click', () => {
+  if (lastPointer === 'touch') return;
   if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
@@ -159,6 +169,99 @@ document.addEventListener('mousemove', (event) => {
   player.pitch -= event.movementY * 0.0018;
   player.pitch = Math.max(-1.05, Math.min(0.85, player.pitch));
 });
+
+const stickEl = document.querySelector('#stick');
+const knobEl = document.querySelector('#stick-knob');
+const speedRange = document.querySelector('#speed-range');
+const speedValue = document.querySelector('#speed-value');
+const STICK_RADIUS = 46;
+let stickPointer = null;
+let lookPointer = null;
+let lookLastX = 0;
+let lookLastY = 0;
+
+function formatSpeed(value) {
+  return `${value.toFixed(1).replace('.', ',')} m/s`;
+}
+
+function setWalkSpeed(value) {
+  walkSpeed = Math.min(WALK_MAX, Math.max(WALK_MIN, value));
+  speedValue.textContent = formatSpeed(walkSpeed);
+}
+
+speedRange.addEventListener('input', () => setWalkSpeed(Number(speedRange.value)));
+
+function placeKnob(clientX, clientY) {
+  const rect = stickEl.getBoundingClientRect();
+  const dx = clientX - (rect.left + rect.width / 2);
+  const dy = clientY - (rect.top + rect.height / 2);
+  const len = Math.hypot(dx, dy) || 1;
+  const reach = Math.min(STICK_RADIUS, len);
+  const nx = (dx / len) * reach;
+  const ny = (dy / len) * reach;
+  knobEl.style.transform = `translate(${nx}px, ${ny}px)`;
+  stickX = nx / STICK_RADIUS;
+  stickY = ny / STICK_RADIUS;
+}
+
+function releaseStick() {
+  stickPointer = null;
+  stickX = 0;
+  stickY = 0;
+  knobEl.style.transform = 'translate(0px, 0px)';
+}
+
+stickEl.addEventListener('pointerdown', (event) => {
+  lastPointer = event.pointerType;
+  stickPointer = event.pointerId;
+  try {
+    stickEl.setPointerCapture(event.pointerId);
+  } catch {
+    /* The pointer is already gone, or this event was synthesized. */
+  }
+  placeKnob(event.clientX, event.clientY);
+  event.preventDefault();
+});
+stickEl.addEventListener('pointermove', (event) => {
+  if (event.pointerId !== stickPointer) return;
+  placeKnob(event.clientX, event.clientY);
+});
+stickEl.addEventListener('pointerup', (event) => {
+  if (event.pointerId !== stickPointer) return;
+  releaseStick();
+});
+stickEl.addEventListener('pointercancel', (event) => {
+  if (event.pointerId !== stickPointer) return;
+  releaseStick();
+});
+
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'mouse' || event.target !== canvas) return;
+  lookPointer = event.pointerId;
+  lookLastX = event.clientX;
+  lookLastY = event.clientY;
+  try {
+    canvas.setPointerCapture(event.pointerId);
+  } catch {
+    /* The pointer is already gone, or this event was synthesized. */
+  }
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerId !== lookPointer) return;
+  const dx = event.clientX - lookLastX;
+  const dy = event.clientY - lookLastY;
+  lookLastX = event.clientX;
+  lookLastY = event.clientY;
+  player.yaw += dx * 0.0022;
+  player.pitch -= dy * 0.0018;
+  player.pitch = Math.max(-1.05, Math.min(0.85, player.pitch));
+});
+function endLook(event) {
+  if (event.pointerId !== lookPointer) return;
+  lookPointer = null;
+}
+canvas.addEventListener('pointerup', endLook);
+canvas.addEventListener('pointercancel', endLook);
 
 function setStatus(locked) {
   const place = api.start?.label || 'centrum';
@@ -295,29 +398,23 @@ function updatePlayer(dt) {
   const forwardZ = -Math.cos(player.yaw);
   const rightX = -Math.cos(player.yaw);
   const rightZ = Math.sin(player.yaw);
-  let mx = 0;
-  let mz = 0;
-  if (keys.has('KeyW')) {
-    mx += forwardX;
-    mz += forwardZ;
-  }
-  if (keys.has('KeyS')) {
-    mx -= forwardX;
-    mz -= forwardZ;
-  }
-  if (keys.has('KeyD')) {
-    mx += rightX;
-    mz += rightZ;
-  }
-  if (keys.has('KeyA')) {
-    mx -= rightX;
-    mz -= rightZ;
-  }
-  const moving = mx !== 0 || mz !== 0;
+  let forward = 0;
+  let strafe = 0;
+  if (keys.has('KeyW')) forward += 1;
+  if (keys.has('KeyS')) forward -= 1;
+  if (keys.has('KeyD')) strafe += 1;
+  if (keys.has('KeyA')) strafe -= 1;
+  forward += -stickY;
+  strafe += stickX;
+  const mag = Math.hypot(forward, strafe);
+  const moving = mag > 0.08;
   const fast = keys.has('ShiftLeft') || keys.has('ShiftRight');
   if (moving) {
+    const scale = mag > 1 ? 1 / mag : 1;
+    const mx = (forward * scale) * forwardX + (strafe * scale) * rightX;
+    const mz = (forward * scale) * forwardZ + (strafe * scale) * rightZ;
     const len = Math.hypot(mx, mz) || 1;
-    const speed = fast ? 280 : 3.6;
+    const speed = (fast ? 280 : walkSpeed) * Math.min(1, mag);
     tryMove((mx / len) * speed * dt, (mz / len) * speed * dt);
     bob += dt * (fast ? 12 : 7.2);
     gait = Math.min(1, gait + dt * 8);

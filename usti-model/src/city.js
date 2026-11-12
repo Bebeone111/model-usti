@@ -566,9 +566,9 @@ function facadeMaterial(color) {
 
 const CAFE_GARDEN = {
   name: 'C´UP - coffeeup',
-  // Northeast facade, in the paved strip between the house and Palachova.
-  lon: 14.0274401,
-  lat: 50.6657347,
+  // Palachova side of the house, in the strip between that wall and the roadway.
+  lon: 14.0274680,
+  lat: 50.6657236,
   yaw: 0.8669,
 };
 
