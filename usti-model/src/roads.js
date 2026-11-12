@@ -62,7 +62,9 @@ function prepareSegments(features, projector) {
     let full = 0;
     for (let i = 1; i < local.length; i++) full += hypot(local[i - 1], local[i]);
     let half = (WALK_WIDTH[key] || roadWidth(tags.highway) || 0) / 2;
-    if (key === 'pedestrian' && full > 90) half = 17;
+    // A long pedestrian way is a square, not a street. The old 34 m ribbon
+    // painted Mírové náměstí as a solid sand field over the orthophoto.
+    if (key === 'pedestrian' && full > 90) half = 3.4;
     if (!(half > 0.15)) continue;
     const roundabout = tags.junction === 'roundabout';
     let left = kind === 'asphalt' && sideOn(tags, 'left', key);

@@ -11,7 +11,7 @@ npm run dev
 
 Prohlížeč: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
-Ovládání: **WASD** chůze (asi 3,6 m/s), **Shift** rychlý přesun (asi 280 m/s, centrum za pár sekund), **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši.
+Ovládání: **WASD** chůze (výchozí 3,6 m/s, posuvník 1–16), **Shift** nebo tlačítko Rychle asi čtyřnásobek, **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši. Kolečko mění odstup kamery, **V** přepíná první osobu, **M** mapu, **E** kartu místa, **Tab** nápovědu. Jemnější terén při novém stažení: `npm run download -- --terrain-mpp=5` (výchozí je 8 m, nasazená mřížka zůstává u osmi metrů).
 
 Data už jsou ve složce `public/data/` (Vite je zkopíruje do sestavené aplikace na `/data/`). Znovu je stáhnete pomocí `npm run download` (potřebuje síť).
 

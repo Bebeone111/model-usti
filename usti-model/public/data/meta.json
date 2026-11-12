@@ -1,8 +1,8 @@
 {
-  "downloadedAt": "2026-11-12T10:22:28.395Z",
+  "downloadedAt": "2026-11-12T15:45:11.551Z",
   "bbox": {
     "west": 14.0269,
-    "south": 50.655,
+    "south": 50.6544,
     "east": 14.055,
     "north": 50.668
   },
@@ -13,50 +13,57 @@
   },
   "origin": {
     "lon": 14.040949999999999,
-    "lat": 50.661500000000004
+    "lat": 50.6612
   },
-  "osmTimestamp": "2026-11-12T10:20:45Z",
-  "themeTimestamps": {
-    "trees": "2026-11-12T12:52:17Z"
-  },
+  "osmTimestamp": "2026-11-12T15:42:38Z",
   "osmCopyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
   "overpassUrl": "https://overpass-api.de/api/interpreter",
-  "wmsUrl": "https://ags.cuzk.gov.cz/arcgis1/services/ORTOFOTO/MapServer/WMSServer?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=0&STYLES=&CRS=EPSG%3A4326&BBOX=50.655%2C14.0269%2C50.668%2C14.055&WIDTH=3605&HEIGHT=2613&FORMAT=image%2Fjpeg&TRANSPARENT=FALSE",
+  "wmsUrl": "https://ags.cuzk.gov.cz/arcgis1/services/ORTOFOTO/MapServer/WMSServer?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=0&STYLES=&CRS=EPSG%3A4326&BBOX=50.6544%2C14.0269%2C50.668%2C14.055&WIDTH=3605&HEIGHT=2733&FORMAT=image%2Fjpeg&TRANSPARENT=FALSE",
   "counts": {
-    "buildings": 2116,
-    "highways": 1543,
-    "landuse": 111,
+    "buildings": 2158,
+    "highways": 1577,
+    "landuse": 115,
     "water": 8,
-    "trees": 17
+    "trees": 17,
+    "furniture": 383,
+    "routes": 1992
   },
   "skipped": {
     "buildings": 0,
     "highways": 0,
     "landuse": 0,
     "water": 1,
-    "trees": 0
+    "trees": 0,
+    "furniture": 0,
+    "routes": 0
   },
   "ortho": {
     "file": "ortho.jpg",
     "worldFile": "ortho.jgw",
     "width": 3605,
-    "height": 2613,
-    "bytes": 1812468,
-    "metersPerPixelX": 0.5500415391907371,
-    "metersPerPixelY": 0.5499502487561395,
-    "crs": "EPSG:4326"
+    "height": 2733,
+    "bytes": 1890872,
+    "metersPerPixelX": 0.5500450530487743,
+    "metersPerPixelY": 0.5500709842662416,
+    "crs": "EPSG:4326",
+    "mobile": {
+      "file": "ortho-mobile.jpg",
+      "width": 2048,
+      "height": 1552,
+      "bytes": 612081
+    }
   },
   "terrain": {
     "file": "terrain.json",
     "service": "https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage",
-    "exportUrl": "https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage?bbox=14.0269%2C50.655%2C14.055%2C50.668&bboxSR=4326&imageSR=4326&size=248%2C180&format=tiff&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image",
+    "exportUrl": "https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage?bbox=14.0269%2C50.6544%2C14.055%2C50.668&bboxSR=4326&imageSR=4326&size=248%2C188&format=tiff&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image",
     "width": 248,
-    "height": 180,
-    "elevMin": 133.29,
-    "elevMax": 265.1,
+    "height": 188,
+    "elevMin": 133.33,
+    "elevMax": 265.01,
     "verticalDatum": "Balt po vyrovnání (Bpv)",
     "metersPerPixelX": 7.996,
-    "metersPerPixelY": 7.983,
+    "metersPerPixelY": 7.997,
     "license": "Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK, DMR 5G"
   },
   "licenses": {

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +22,22 @@ const themes = [
     'trees',
     `node["natural"="tree"](${b});way["natural"="tree_row"](${b});way["natural"="wood"](${b});relation["natural"="wood"](${b});way["leisure"="park"](${b});relation["leisure"="park"](${b});`,
   ],
+  [
+    'furniture',
+    `node["amenity"="bench"](${b});node["highway"="street_lamp"](${b});node["highway"="bus_stop"](${b});node["amenity"="waste_basket"](${b});node["highway"="crossing"](${b});`,
+  ],
+  ['routes', `relation["route"="trolleybus"](${b});`],
 ];
+
+const KEEP = {
+  buildings: ['height', 'building:levels', 'building', 'min_height', 'building:min_level', 'roof:shape', 'name'],
+  highways: ['highway', 'footway', 'sidewalk', 'sidewalk:left', 'sidewalk:right', 'name', 'junction', 'bridge'],
+  landuse: ['landuse', 'leisure', 'natural', 'name'],
+  water: ['natural', 'water', 'waterway', 'name'],
+  trees: ['natural', 'leisure', 'landuse', 'name'],
+  furniture: ['amenity', 'highway', 'name', 'shelter'],
+  routes: ['route', 'name', 'ref'],
+};
 
 const endpoints = [
   'https://overpass-api.de/api/interpreter',
@@ -137,23 +153,36 @@ function relationPolygons(el) {
   return polys;
 }
 
-function propsOf(el) {
-  return { ...(el.tags || {}), osmType: el.type, osmId: el.id };
+function propsOf(el, theme) {
+  const tags = el.tags || {};
+  const allow = KEEP[theme];
+  const out = { osmId: el.id };
+  if (!allow) {
+    for (const [key, value] of Object.entries(tags)) {
+      if (value != null && value !== '') out[key] = value;
+    }
+  } else {
+    for (const key of allow) {
+      if (tags[key] != null && tags[key] !== '') out[key] = tags[key];
+    }
+  }
+  if (out.name === 'Městský čast Střekov') out.name = 'Městský část Střekov';
+  return out;
 }
 
-function polygonFeature(el, polygons) {
+function polygonFeature(el, polygons, theme) {
   if (!polygons.length) return null;
   if (polygons.length === 1) {
     const p = polygons[0];
     return {
       type: 'Feature',
-      properties: propsOf(el),
+      properties: propsOf(el, theme),
       geometry: { type: 'Polygon', coordinates: [p.outer, ...p.holes] },
     };
   }
   return {
     type: 'Feature',
-    properties: propsOf(el),
+    properties: propsOf(el, theme),
     geometry: {
       type: 'MultiPolygon',
       coordinates: polygons.map((p) => [p.outer, ...p.holes]),
@@ -161,13 +190,37 @@ function polygonFeature(el, polygons) {
   };
 }
 
-function lineFeature(el, coords) {
+function lineFeature(el, coords, theme) {
   if (coords.length < 2) return null;
   return {
     type: 'Feature',
-    properties: propsOf(el),
+    properties: propsOf(el, theme),
     geometry: { type: 'LineString', coordinates: coords },
   };
+}
+
+function convertRoutes(elements) {
+  const features = [];
+  let skipped = 0;
+  for (const el of elements) {
+    if (el.type !== 'relation' || el.tags?.route !== 'trolleybus') {
+      skipped += 1;
+      continue;
+    }
+    let any = false;
+    for (const member of el.members || []) {
+      const coords = wayCoords(member);
+      if (coords.length < 2) continue;
+      features.push({
+        type: 'Feature',
+        properties: propsOf(el, 'routes'),
+        geometry: { type: 'LineString', coordinates: coords },
+      });
+      any = true;
+    }
+    if (!any) skipped += 1;
+  }
+  return { features, skipped };
 }
 
 function convertTheme(name, elements) {
@@ -189,10 +242,10 @@ function convertTheme(name, elements) {
       continue;
     }
     if (el.type === 'node') {
-      if (name === 'trees' && Number.isFinite(el.lon) && Number.isFinite(el.lat)) {
+      if ((name === 'trees' || name === 'furniture') && Number.isFinite(el.lon) && Number.isFinite(el.lat)) {
         features.push({
           type: 'Feature',
-          properties: propsOf(el),
+          properties: propsOf(el, name),
           geometry: { type: 'Point', coordinates: [el.lon, el.lat] },
         });
       } else skipped += 1;
@@ -202,37 +255,37 @@ function convertTheme(name, elements) {
       const coords = wayCoords(el);
       const closed = isClosed(coords);
       if (name === 'trees') {
-        const feature = tags.natural === 'tree_row' || !closed ? lineFeature(el, coords) : polygonFeature(el, [{ outer: coords, holes: [] }]);
+        const feature = tags.natural === 'tree_row' || !closed ? lineFeature(el, coords, name) : polygonFeature(el, [{ outer: coords, holes: [] }], name);
         if (feature) features.push(feature);
         else skipped += 1;
         continue;
       }
       if (name === 'highways') {
-        const feature = lineFeature(el, coords);
+        const feature = lineFeature(el, coords, name);
         if (feature) features.push(feature);
         else skipped += 1;
         continue;
       }
       if (name === 'water' && tags.waterway && tags.waterway !== 'riverbank' && !closed) {
-        const feature = lineFeature(el, coords);
+        const feature = lineFeature(el, coords, name);
         if (feature) features.push(feature);
         else skipped += 1;
         continue;
       }
       if (!closed) {
         if (name === 'water' && tags.waterway) {
-          const feature = lineFeature(el, coords);
+          const feature = lineFeature(el, coords, name);
           if (feature) features.push(feature);
         } else skipped += 1;
         continue;
       }
-      const feature = polygonFeature(el, [{ outer: coords, holes: [] }]);
+      const feature = polygonFeature(el, [{ outer: coords, holes: [] }], name);
       if (feature) features.push(feature);
       else skipped += 1;
       continue;
     }
     if (el.type === 'relation') {
-      const feature = polygonFeature(el, relationPolygons(el));
+      const feature = polygonFeature(el, relationPolygons(el), name);
       if (feature) features.push(feature);
       else skipped += 1;
     }
@@ -339,6 +392,7 @@ async function downloadOrtho() {
       const pxH = (bbox.north - bbox.south) / size.height;
       const world = [pxW, 0, 0, -pxH, bbox.west + pxW / 2, bbox.north - pxH / 2].join('\n') + '\n';
       fs.writeFileSync(path.join(dataDir, 'ortho.jgw'), world);
+      const mobile = writeMobileOrtho(file);
       return {
         url,
         width: size.width,
@@ -346,6 +400,7 @@ async function downloadOrtho() {
         bytes: buf.length,
         metersPerPixelX: widthM / size.width,
         metersPerPixelY: heightM / size.height,
+        mobile,
       };
     } catch (error) {
       lastError = error;
@@ -353,6 +408,40 @@ async function downloadOrtho() {
     }
   }
   throw lastError;
+}
+
+function writeMobileOrtho(file) {
+  const dest = path.join(dataDir, 'ortho-mobile.jpg');
+  const result = spawnSync('ffmpeg', ['-y', '-i', file, '-vf', 'scale=2048:-2', '-q:v', '5', dest], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    console.warn(`Menší ortofoto se nepodařilo vytvořit: ${(result.stderr || '').slice(-240)}`);
+    return null;
+  }
+  const buf = fs.readFileSync(dest);
+  const size = jpegSize(buf);
+  console.log(`Ortofoto pro slabší zařízení ${size.width}×${size.height} px, ${buf.length} B`);
+  return { file: 'ortho-mobile.jpg', width: size.width, height: size.height, bytes: buf.length };
+}
+
+function writeTerrainBin(record) {
+  const { width, height, elevMin, elevMax, heights } = record;
+  const header = 20;
+  const buf = Buffer.alloc(header + heights.length * 2);
+  buf.write('HDEM', 0, 'ascii');
+  buf.writeUInt16LE(width, 4);
+  buf.writeUInt16LE(height, 6);
+  buf.writeFloatLE(elevMin, 8);
+  buf.writeFloatLE(elevMax, 12);
+  buf.writeUInt16LE(1, 16);
+  buf.writeUInt16LE(0, 18);
+  const span = elevMax - elevMin || 1;
+  for (let i = 0; i < heights.length; i++) {
+    const t = (heights[i] - elevMin) / span;
+    const q = Math.max(0, Math.min(65535, Math.round(t * 65535)));
+    buf.writeUInt16LE(q, header + i * 2);
+  }
+  fs.writeFileSync(path.join(dataDir, 'terrain.bin'), buf);
+  return buf.length;
 }
 
 function tiffValues(view, entry) {
@@ -469,8 +558,11 @@ async function downloadTerrain() {
   const lat0 = ((bbox.south + bbox.north) / 2) * (Math.PI / 180);
   const widthM = (bbox.east - bbox.west) * 111320 * Math.cos(lat0);
   const heightM = (bbox.north - bbox.south) * 110540;
-  const widthPx = Math.max(2, Math.round(widthM / 8));
-  const heightPx = Math.max(2, Math.round(heightM / 8));
+  const mppArg = process.argv.find((arg) => arg.startsWith('--terrain-mpp='));
+  const terrainMpp = mppArg ? Number(mppArg.slice('--terrain-mpp='.length)) : 8;
+  if (!(terrainMpp >= 3 && terrainMpp <= 16)) throw new Error(`Neplatné --terrain-mpp (${terrainMpp})`);
+  const widthPx = Math.max(2, Math.round(widthM / terrainMpp));
+  const heightPx = Math.max(2, Math.round(heightM / terrainMpp));
   const service = 'https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage';
   const params = new URLSearchParams({
     bbox: `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
@@ -541,6 +633,8 @@ async function downloadTerrain() {
     heights,
   };
   fs.writeFileSync(path.join(dataDir, 'terrain.json'), JSON.stringify(record));
+  const binBytes = writeTerrainBin(record);
+  console.log(`Terén binárně ${binBytes} B (${terrainMpp} m/px)`);
   return {
     file: 'terrain.json',
     service,
@@ -599,15 +693,23 @@ const skipped = {};
 for (const [name, body] of selectedThemes) {
   const query = `[out:json][timeout:120];(${body});out geom;`;
   console.log(`OSM ${name}…`);
-  const { json, url } = await overpass(query);
-  overpassUrl = url;
-  osmTimestamp = json.osm3s?.timestamp_osm_base || osmTimestamp;
-  osmCopyright = json.osm3s?.copyright || osmCopyright;
-  const converted = convertTheme(name, json.elements);
-  writeCollection(name, converted.features, osmCopyright);
-  counts[name] = converted.features.length;
-  skipped[name] = converted.skipped;
-  console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
+  try {
+    const { json, url } = await overpass(query);
+    overpassUrl = url;
+    osmTimestamp = json.osm3s?.timestamp_osm_base || osmTimestamp;
+    osmCopyright = json.osm3s?.copyright || osmCopyright;
+    const converted = name === 'routes' ? convertRoutes(json.elements) : convertTheme(name, json.elements);
+    writeCollection(name, converted.features, osmCopyright);
+    counts[name] = converted.features.length;
+    skipped[name] = converted.skipped;
+    console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
+  } catch (error) {
+    if (name !== 'furniture' && name !== 'routes') throw error;
+    console.warn(`OSM ${name} se nepodařilo stáhnout (${error.message}). Soubor zůstane prázdný.`);
+    writeCollection(name, [], osmCopyright);
+    counts[name] = 0;
+    skipped[name] = 0;
+  }
 }
 
 if (!only && (counts.buildings || 0) < 50) {
@@ -655,6 +757,7 @@ const meta = {
     metersPerPixelX: ortho.metersPerPixelX,
     metersPerPixelY: ortho.metersPerPixelY,
     crs: 'EPSG:4326',
+    mobile: ortho.mobile,
   },
   terrain,
   licenses: {
