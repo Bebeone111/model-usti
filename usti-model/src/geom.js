@@ -267,6 +267,15 @@ export function buildingHeight(tags) {
   return 9;
 }
 
+export function windowRows(tags, top, base) {
+  if (SMALL.has(tags.building)) return 0;
+  const levels = parseMeters(tags['building:levels']);
+  if (levels && levels >= 1 && levels < 50) return Math.max(1, Math.round(levels));
+  const height = Math.max(0, (top || 0) - (base || 0));
+  if (!(height > 0)) return 3;
+  return Math.max(1, Math.round(height / 3));
+}
+
 export function buildingBase(tags, top) {
   let base = parseMeters(tags.min_height) || 0;
   const minLevel = parseMeters(tags['building:min_level']);

@@ -13,7 +13,7 @@ Počátek modelu je střed bboxu: 14.04095° E, 50.6615° N. Osa X míří na v�
 ## OpenStreetMap
 
 - API: <https://overpass-api.de/api/interpreter>
-- Časová značka planetárního výřezu: `2026-11-12T10:20:45Z`
+- Časová značka planetárního výřezu: `2026-11-12T10:20:45Z` (stromy, parky a lesíky doplněny `2026-11-12T12:52:17Z`, ortofoto a DMR se znovu nestahovaly)
 - Licence: [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/)
 - Copyright z odpovědi API: „The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.“
 
@@ -23,6 +23,7 @@ Počátek modelu je střed bboxu: 14.04095° E, 50.6615° N. Osa X míří na v�
 | `highways.geojson` | 1543 | komunikace |
 | `landuse.geojson` | 111 | využití ploch |
 | `water.geojson` | 8 | `natural=water`, `waterway=river` a `riverbank` (Labe, Bílina, nádrže) |
+| `trees.geojson` | 17 | `natural=tree`, `natural=wood`, `leisure=park` (stromořadí, parky a lesíky). Lesy v `landuse=forest` jsou v `landuse.geojson`. |
 
 ## Ortofoto
 

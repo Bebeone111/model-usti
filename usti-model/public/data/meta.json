@@ -16,6 +16,9 @@
     "lat": 50.661500000000004
   },
   "osmTimestamp": "2026-11-12T10:20:45Z",
+  "themeTimestamps": {
+    "trees": "2026-11-12T12:52:17Z"
+  },
   "osmCopyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
   "overpassUrl": "https://overpass-api.de/api/interpreter",
   "wmsUrl": "https://ags.cuzk.gov.cz/arcgis1/services/ORTOFOTO/MapServer/WMSServer?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=0&STYLES=&CRS=EPSG%3A4326&BBOX=50.655%2C14.0269%2C50.668%2C14.055&WIDTH=3605&HEIGHT=2613&FORMAT=image%2Fjpeg&TRANSPARENT=FALSE",
@@ -23,13 +26,15 @@
     "buildings": 2116,
     "highways": 1543,
     "landuse": 111,
-    "water": 8
+    "water": 8,
+    "trees": 17
   },
   "skipped": {
     "buildings": 0,
     "highways": 0,
     "landuse": 0,
-    "water": 1
+    "water": 1,
+    "trees": 0
   },
   "ortho": {
     "file": "ortho.jpg",
