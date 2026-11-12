@@ -564,6 +564,92 @@ function facadeMaterial(color) {
   return material;
 }
 
+const CAFE_GARDEN = {
+  name: 'C´UP - coffeeup',
+  lon: 14.0272097,
+  lat: 50.6657839,
+};
+
+function addCafeGarden(group, sample, projector) {
+  const [x, z] = projector.toLocal(CAFE_GARDEN.lon, CAFE_GARDEN.lat);
+  if (x < projector.minX + 4 || x > projector.maxX - 4 || z < projector.minZ + 4 || z > projector.maxZ - 4) return null;
+  const y = sample(x, z);
+  const root = new THREE.Group();
+  root.name = 'cafe-garden';
+  root.position.set(x, y, z);
+
+  const wood = new THREE.MeshLambertMaterial({ color: 0x8d5a34 });
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.74, 0.07, 18), wood);
+  top.position.y = 0.74;
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.7, 8), wood);
+  leg.position.y = 0.35;
+  root.add(top, leg);
+
+  const shirts = [0x3c6eae, 0xc4553a, 0x3d8b5f, 0xd4a24a, 0x6a4c93, 0x2f6f8f, 0xb85c38, 0x355e78];
+  const hairs = [0x3a2c24, 0x1c140f, 0x6b4a32, 0x2a211c, 0x4a3428, 0x111111, 0x8a6844, 0x241810];
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const guest = makeSeatedGuest(shirts[i], hairs[i]);
+    guest.position.set(Math.cos(angle) * 1.08, 0, Math.sin(angle) * 1.08);
+    guest.rotation.y = Math.PI / 2 - angle;
+    root.add(guest);
+  }
+  group.add(root);
+  return { name: CAFE_GARDEN.name, x, y: y + 2.5, z };
+}
+
+function makeSeatedGuest(shirtColor, hairColor) {
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd2a679 });
+  const hair = new THREE.MeshLambertMaterial({ color: hairColor });
+  const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2a3644 });
+  const chairMat = new THREE.MeshLambertMaterial({ color: 0x6e4a30 });
+  const cupMat = new THREE.MeshLambertMaterial({ color: 0xf7f4ee });
+  const coffee = new THREE.MeshLambertMaterial({ color: 0x4a2e22 });
+  const guest = new THREE.Group();
+
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.42), chairMat);
+  seat.position.set(0, 0.46, 0.06);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.46, 0.05), chairMat);
+  back.position.set(0, 0.7, 0.26);
+  guest.add(seat, back);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.36, 0.16), shirt);
+  torso.position.set(0, 0.86, 0.02);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), skin);
+  head.position.set(0, 1.16, 0.01);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.06, 0.17), hair);
+  cap.position.set(0, 1.26, 0.01);
+  guest.add(torso, head, cap);
+
+  const thighL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.34), pants);
+  thighL.position.set(-0.09, 0.5, -0.16);
+  const thighR = thighL.clone();
+  thighR.position.x = 0.09;
+  const shinL = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.32, 0.09), pants);
+  shinL.position.set(-0.09, 0.28, -0.32);
+  const shinR = shinL.clone();
+  shinR.position.x = 0.09;
+  const footL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.16), new THREE.MeshLambertMaterial({ color: 0x241c18 }));
+  footL.position.set(-0.09, 0.08, -0.36);
+  const footR = footL.clone();
+  footR.position.x = 0.09;
+  guest.add(thighL, thighR, shinL, shinR, footL, footR);
+
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.28), shirt);
+  armL.position.set(-0.2, 0.78, -0.16);
+  const armR = armL.clone();
+  armR.position.x = 0.2;
+  guest.add(armL, armR);
+
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.07, 8), cupMat);
+  cup.position.set(0.12, 0.8, -0.58);
+  const drink = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.015, 8), coffee);
+  drink.position.set(0.12, 0.83, -0.58);
+  guest.add(cup, drink);
+  return guest;
+}
+
 export function buildCity(data, projector) {
   const { buildings, highways, water } = data;
   const sample = data.terrain?.sample || (() => 0);
@@ -867,6 +953,9 @@ export function buildCity(data, projector) {
     sprite.scale.set(map.userData.aspect * 4, 4, 1);
     group.add(sprite);
   };
+
+  const cafe = addCafeGarden(group, sample, projector);
+  if (cafe) place(cafe.name, cafe.x, cafe.y, cafe.z);
 
   for (const [text, point] of streetLabels) place(text, point.x, point.y, point.z);
   for (const [text, point] of riverLabels) place(text, point.x, point.y, point.z);
