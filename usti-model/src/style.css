@@ -17,6 +17,16 @@ body {
 }
 
 body:not(.playing) #view {
+  visibility: visible;
+  filter: blur(14px) saturate(0.9);
+  transform: scale(1.04);
+}
+
+body:not(.playing) #hud,
+body:not(.playing) #dock,
+body:not(.playing) #mini,
+body:not(.playing) #credit,
+body:not(.playing) #touch {
   visibility: hidden;
 }
 
@@ -271,9 +281,25 @@ a {
 
 #start {
   z-index: 22;
-  background:
-    linear-gradient(180deg, rgba(14, 32, 46, 0.2), rgba(14, 32, 46, 0.72)),
-    #163044;
+  background: rgba(14, 32, 46, 0.38);
+}
+
+#poi-photo {
+  margin: 0 0 10px;
+}
+
+#poi-photo img {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+#poi-photo figcaption {
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 #loading {

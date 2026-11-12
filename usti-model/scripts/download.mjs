@@ -13,6 +13,7 @@ const b = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
 const themes = [
   ['buildings', `way["building"](${b});relation["building"](${b});`],
   ['highways', `way["highway"](${b});`],
+  ['railways', `way["railway"="rail"](${b});way["railway"="rail"]["bridge"="yes"](${b});`],
   ['landuse', `way["landuse"](${b});relation["landuse"](${b});`],
   [
     'water',
@@ -27,16 +28,36 @@ const themes = [
     `node["amenity"="bench"](${b});node["highway"="street_lamp"](${b});node["highway"="bus_stop"](${b});node["amenity"="waste_basket"](${b});node["highway"="crossing"](${b});`,
   ],
   ['routes', `relation["route"="trolleybus"](${b});`],
+  ['addresses', `node["addr:housenumber"](${b});`],
 ];
 
 const KEEP = {
-  buildings: ['height', 'building:levels', 'building', 'min_height', 'building:min_level', 'roof:shape', 'name'],
-  highways: ['highway', 'footway', 'sidewalk', 'sidewalk:left', 'sidewalk:right', 'name', 'junction', 'bridge'],
+  buildings: [
+    'height',
+    'building:levels',
+    'building',
+    'min_height',
+    'building:min_level',
+    'roof:shape',
+    'roof:levels',
+    'roof:colour',
+    'building:colour',
+    'building:material',
+    'shop',
+    'amenity',
+    'opening_hours',
+    'name',
+    'addr:street',
+    'addr:housenumber',
+  ],
+  highways: ['highway', 'footway', 'sidewalk', 'sidewalk:left', 'sidewalk:right', 'name', 'junction', 'bridge', 'railway'],
+  railways: ['railway', 'bridge', 'name', 'layer', 'gauge'],
   landuse: ['landuse', 'leisure', 'natural', 'name'],
-  water: ['natural', 'water', 'waterway', 'name'],
+  water: ['natural', 'water', 'waterway', 'name', 'weir'],
   trees: ['natural', 'leisure', 'landuse', 'name'],
   furniture: ['amenity', 'highway', 'name', 'shelter'],
   routes: ['route', 'name', 'ref'],
+  addresses: ['addr:street', 'addr:housenumber', 'addr:place', 'name'],
 };
 
 const endpoints = [
@@ -311,6 +332,20 @@ function convertTheme(name, elements) {
       continue;
     }
     if (el.type === 'node') {
+      if (name === 'addresses' && Number.isFinite(el.lon) && Number.isFinite(el.lat)) {
+        const props = propsOf(el, name);
+        const street = props['addr:street'] || props['addr:place'] || '';
+        const num = props['addr:housenumber'] || '';
+        const label = `${street} ${num}`.trim() || props.name;
+        if (label) {
+          features.push({
+            type: 'Feature',
+            properties: { ...props, name: label },
+            geometry: { type: 'Point', coordinates: [el.lon, el.lat] },
+          });
+        } else skipped += 1;
+        continue;
+      }
       if ((name === 'trees' || name === 'furniture') && Number.isFinite(el.lon) && Number.isFinite(el.lat)) {
         features.push({
           type: 'Feature',
@@ -329,7 +364,7 @@ function convertTheme(name, elements) {
         else skipped += 1;
         continue;
       }
-      if (name === 'highways') {
+      if (name === 'highways' || name === 'railways') {
         const feature = lineFeature(el, coords, name);
         if (feature) features.push(feature);
         else skipped += 1;
@@ -875,7 +910,7 @@ for (const [name, body] of selectedThemes) {
     skipped[name] = converted.skipped;
     console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
   } catch (error) {
-    if (name !== 'furniture' && name !== 'routes') throw error;
+    if (name !== 'furniture' && name !== 'routes' && name !== 'railways' && name !== 'addresses') throw error;
     console.warn(`OSM ${name} se nepodařilo stáhnout (${error.message}). Soubor zůstane prázdný.`);
     writeCollection(name, [], osmCopyright);
     counts[name] = 0;
@@ -885,6 +920,43 @@ for (const [name, body] of selectedThemes) {
 
 if (!only && (counts.buildings || 0) < 50) {
   throw new Error('Příliš málo budov — bbox nebo Overpass nevrátil centrum.');
+}
+
+function writeAddressesFromBuildings() {
+  const file = path.join(dataDir, 'buildings.geojson');
+  if (!fs.existsSync(file)) return 0;
+  const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const rows = [];
+  for (const feature of json.features || []) {
+    const tags = feature.properties || {};
+    const street = tags['addr:street'];
+    const num = tags['addr:housenumber'];
+    if (!street || !num) continue;
+    const geom = feature.geometry;
+    let lon = 0;
+    let lat = 0;
+    let n = 0;
+    const ring = geom?.type === 'Polygon' ? geom.coordinates[0] : geom?.type === 'MultiPolygon' ? geom.coordinates[0]?.[0] : null;
+    if (!ring) continue;
+    for (const [lo, la] of ring) {
+      lon += lo;
+      lat += la;
+      n += 1;
+    }
+    rows.push({ name: `${street} ${num}`, lon: lon / n, lat: lat / n });
+  }
+  fs.writeFileSync(path.join(dataDir, 'addresses.json'), JSON.stringify(rows, null, 2));
+  return rows.length;
+}
+
+async function tryRuianNote() {
+  const note = {
+    tried: true,
+    skipped: true,
+    reason: 'Celá obec Ústí nad Labem ve VFR/GML je moc velká na runtime model; adresy bereme z OSM v bboxu. RÚIAN se do výšek zapojí, až bude oříznutý výřez.',
+  };
+  fs.writeFileSync(path.join(dataDir, 'ruian-skip.json'), JSON.stringify(note, null, 2));
+  return note;
 }
 
 if (only) {
@@ -898,9 +970,16 @@ if (only) {
   }
   if (osmCopyright) meta.osmCopyright = osmCopyright;
   if (overpassUrl) meta.overpassUrl = overpassUrl;
+  if (only.includes('buildings')) writeAddressesFromBuildings();
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   console.log(JSON.stringify({ counts, skipped }, null, 2));
   process.exit(0);
+}
+
+const addressCount = writeAddressesFromBuildings();
+await tryRuianNote();
+if (!only && selectedThemes.some(([name]) => name === 'railways' || name === 'buildings')) {
+  console.log(`Adresy z OSM: ${addressCount}`);
 }
 
 const ortho = await downloadOrtho();

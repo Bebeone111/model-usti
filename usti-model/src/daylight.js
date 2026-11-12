@@ -51,6 +51,16 @@ export function isWet(weather) {
   return (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
 }
 
+export async function fetchAirQuality() {
+  const url = 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=50.660&longitude=14.041&current=european_aqi,pm2_5&timezone=Europe%2FPrague';
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('ovzduší');
+  const json = await response.json();
+  const current = json.current || null;
+  if (!current || !Number.isFinite(current.european_aqi)) return null;
+  return { european_aqi: current.european_aqi, pm2_5: current.pm2_5 };
+}
+
 export async function fetchWeather() {
   const url = 'https://api.open-meteo.com/v1/forecast?latitude=50.660&longitude=14.041&current=temperature_2m,weather_code,cloud_cover,rain,wind_speed_10m&timezone=Europe%2FPrague';
   const response = await fetch(url);

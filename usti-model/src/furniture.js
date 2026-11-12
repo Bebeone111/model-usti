@@ -49,10 +49,16 @@ export function addStreetFurniture(group, collection, projector, sample) {
     const tags = feature.properties || {};
     const point = { x, z, y: sample(x, z), rot: unit(x, z, 7) * Math.PI * 2 };
     if (tags.amenity === 'bench') benches.push(point);
-    else if (tags.highway === 'street_lamp') lamps.push(point);
-    else if (tags.highway === 'bus_stop') stops.push(point);
+    else if (tags.highway === 'street_lamp') lamps.push({ ...point, name: tags.name || '' });
+    else if (tags.highway === 'bus_stop') stops.push({ ...point, name: tags.name || '' });
     else if (tags.amenity === 'waste_basket') bins.push(point);
     else if (tags.highway === 'crossing') crossings.push(point);
+  }
+  const square = projector.toLocal(14.040439, 50.660244);
+  if (!lamps.some((lamp) => Math.hypot(lamp.x - square[0], lamp.z - square[1]) < 28)) {
+    for (const [dx, dz] of [[-12, -8], [10, -9], [12, 8], [-9, 11], [0, -14], [16, 2]]) {
+      lamps.push({ x: square[0] + dx, z: square[1] + dz, y: sample(square[0] + dx, square[1] + dz), rot: 0, name: '' });
+    }
   }
   const root = new THREE.Group();
   root.name = 'furniture';
@@ -92,9 +98,9 @@ export function addStreetFurniture(group, collection, projector, sample) {
       dummy.scale.set(1, 1, 1);
     }),
     instanced(stripeGeometry(), new THREE.MeshBasicMaterial({ color: 0xf7f4ee }), crossings, (dummy, point) => {
-      dummy.position.set(point.x, point.y + 0.16, point.z);
+      dummy.position.set(point.x, point.y + 0.18, point.z);
       dummy.rotation.set(0, point.rot, 0);
-      dummy.scale.set(1, 1, 1);
+      dummy.scale.set(1.15, 1, 1.15);
     }),
   ].filter(Boolean);
   for (const mesh of meshes) {
@@ -105,6 +111,7 @@ export function addStreetFurniture(group, collection, projector, sample) {
   return {
     lampMat,
     lamps,
+    stops,
     counts: { bench: benches.length, lamp: lamps.length, stop: stops.length, bin: bins.length, crossing: crossings.length },
     setDensity(factor) {
       for (const mesh of meshes) mesh.count = Math.max(0, Math.floor(mesh.userData.fullCount * factor));
@@ -112,54 +119,26 @@ export function addStreetFurniture(group, collection, projector, sample) {
   };
 }
 
-function pylon(height, color) {
-  const mat = new THREE.MeshLambertMaterial({ color });
-  const root = new THREE.Group();
-  const leg = new THREE.BoxGeometry(0.7, height, 0.7);
-  const left = new THREE.Mesh(leg, mat);
-  left.position.set(-1.1, height / 2, 0);
-  const right = new THREE.Mesh(leg, mat);
-  right.position.set(1.1, height / 2, 0);
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(3, 0.45, 0.6), mat);
-  beam.position.y = height - 0.3;
-  root.add(left, right, beam);
-  return root;
-}
-
-export function addBridgeMarks(group, highways, projector, sample) {
-  let count = 0;
-  for (const feature of highways?.features || []) {
-    const name = String(feature.properties?.name || '');
-    if (feature.properties?.bridge !== 'yes' || feature.geometry?.type !== 'LineString') continue;
-    if (!/Mariánský most|Beneše/.test(name)) continue;
-    const pts = feature.geometry.coordinates.map(([lon, lat]) => projector.toLocal(lon, lat));
-    if (pts.length < 2) continue;
-    const tall = /Mariánský/.test(name);
-    const tops = [];
-    for (const t of [0.16, 0.84]) {
-      const index = Math.min(pts.length - 1, Math.max(0, Math.round(t * (pts.length - 1))));
-      const [x, z] = pts[index];
-      if (!inside(projector, x, z)) continue;
-      const mark = pylon(tall ? 22 : 9, tall ? 0xd8dde3 : 0xb7c0b2);
-      mark.position.set(x, sample(x, z), z);
-      const next = pts[Math.min(pts.length - 1, index + 1)];
-      mark.rotation.y = Math.atan2(next[0] - x, next[1] - z);
-      mark.userData.noShadow = true;
-      group.add(mark);
-      const height = tall ? 22 : 9;
-      tops.push(new THREE.Vector3(x, sample(x, z) + height - 0.2, z));
-      count += 1;
-    }
-    if (tall && tops.length === 2) {
-      const sag = tops[0].clone().lerp(tops[1], 0.5);
-      sag.y -= 3.2;
-      const cables = new THREE.BufferGeometry().setFromPoints([tops[0], sag, tops[1]]);
-      const wire = new THREE.Line(cables, new THREE.LineBasicMaterial({ color: 0xe7eef4 }));
-      wire.userData.noShadow = true;
-      group.add(wire);
-    }
-  }
-  return count;
+export function boxBlocker(x, z, hx, hz, y = 0) {
+  const outer = [
+    [x - hx, z - hz],
+    [x + hx, z - hz],
+    [x + hx, z + hz],
+    [x - hx, z + hz],
+    [x - hx, z - hz],
+  ];
+  return {
+    outer,
+    holes: [],
+    minX: x - hx,
+    maxX: x + hx,
+    minZ: z - hz,
+    maxZ: z + hz,
+    top: y,
+    blocksWalk: true,
+    blocksCamera: true,
+    kind: 'landmark',
+  };
 }
 
 export function addVetruseMark(group, projector, sample) {
@@ -181,7 +160,7 @@ export function addVetruseMark(group, projector, sample) {
   mast.position.set(x, y + 8.4, z);
   for (const mesh of [body, roof, deck, rail, mast]) mesh.userData.noShadow = true;
   group.add(body, roof, deck, rail, mast);
-  return true;
+  return boxBlocker(x, z, 6.4, 4.6, y + 6);
 }
 
 function busGeometry() {

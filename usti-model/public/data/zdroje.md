@@ -26,7 +26,9 @@ Počátek modelu je střed bboxu: 14.04095° E, 50.6615° N. Osa X míří na v�
 | `trees.geojson` | 17 | `natural=tree`, `natural=wood`, `leisure=park` (stromořadí, parky a lesíky). Lesy v `landuse=forest` jsou v `landuse.geojson`. |
 | `furniture.geojson` | 383 | lavičky, lampy, zastávky, koše, přechody |
 | `routes.geojson` | 13 | jedna zjednodušená trasa na trolejbusovou linku |
-| `pois.json` | 12 | karty zajímavých míst |
+| `pois.json` | 13 | karty zajímavých míst (včetně železničního mostu) |
+| `railways.geojson` | dle stažení | `railway=rail`, mosty; když Overpass selže, most se kreslí z osy v kódu |
+| `addresses.json` | dle OSM | `addr:street` + číslo v bboxu, hledání na mapě |
 
 ## Ortofoto
 

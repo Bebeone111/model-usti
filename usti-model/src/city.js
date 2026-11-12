@@ -14,6 +14,7 @@ import {
   windowRows,
 } from './geom.js';
 import { buildRoadGeometry, makeLineIndex } from './roads.js';
+import { onDeck } from './bridges.js';
 
 const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
 const ROOFS = [0xd4653a, 0xc4512c, 0xe07040, 0xb8432a, 0xcc5a34, 0xa84830, 0x8d4a3c, 0x5c646c];
@@ -40,6 +41,39 @@ function hashId(value) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
   return h >>> 0;
+}
+
+const NAMED_COLORS = {
+  red: 0x8c3a32,
+  brick: 0x8c3a32,
+  brown: 0x6e4a32,
+  yellow: 0xe2c36a,
+  white: 0xf2ece2,
+  grey: 0x8a9096,
+  gray: 0x8a9096,
+  black: 0x3a3c40,
+  beige: 0xe8d7b8,
+  cream: 0xf0e6d2,
+  sand: 0xe2d0ae,
+  orange: 0xc46a32,
+};
+
+function parseColor(value) {
+  if (!value) return null;
+  const text = String(value).trim().toLowerCase();
+  if (NAMED_COLORS[text] != null) return NAMED_COLORS[text];
+  const hex = text.match(/^#?([0-9a-f]{6})$/);
+  if (hex) return Number.parseInt(hex[1], 16);
+  return null;
+}
+
+function wallColorFor(tags, fallback) {
+  if (tags['building:material'] === 'brick' && !tags['building:colour']) return 0x8c3a32;
+  return parseColor(tags['building:colour']) || fallback;
+}
+
+function roofColorFor(tags, fallback) {
+  return parseColor(tags['roof:colour']) || fallback;
 }
 
 function orient(ring, ccw) {
@@ -175,7 +209,7 @@ function geometryFromParts(parts) {
 }
 
 function mergeList(list) {
-  const geometries = list.filter(Boolean);
+  const geometries = list.filter(Boolean).map((geometry) => (geometry.index ? geometry.toNonIndexed() : geometry));
   if (!geometries.length) return null;
   const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
   if (geometries.length > 1) geometries.forEach((geometry) => geometry.dispose());
@@ -423,7 +457,7 @@ function facadeOnBeforeCompile(shader) {
       diffuseColor.rgb *= mix(1.0, 0.8, course);
       float cornice = step(0.9, fy);
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
-      diffuseColor.rgb += vec3(1.0, 0.78, 0.42) * pane * nightGlow * 0.7;`,
+      diffuseColor.rgb += vec3(1.0, 0.78, 0.42) * pane * nightGlow * 1.45;`,
     );
 }
 
@@ -542,7 +576,7 @@ function styledFacade(style, name) {
         tone = mix(tone, uGlass, pane * 0.9);
         tone = mix(tone, uTrim, cornice);
         tone *= mix(1.0, 0.7, base * 0.8);
-        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow;`,
+        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow * 1.35;`,
       );
   };
   material.customProgramCacheKey = () => `usti-landmark-${name}`;
@@ -951,15 +985,15 @@ function onMapEdge(ax, az, bx, bz, box) {
   );
 }
 
-function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift) {
-  const y0 = sample(ax, az) + lift;
-  const y1 = sample(bx, bz) + lift;
-  const y2 = sample(bx + ox, bz + oz) + lift;
-  const y3 = sample(ax + ox, az + oz) + lift;
+function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift, cap = Infinity) {
+  const y0 = Math.min(cap, sample(ax, az) + lift);
+  const y1 = Math.min(cap, sample(bx, bz) + lift);
+  const y2 = Math.min(cap, sample(bx + ox, bz + oz) + lift);
+  const y3 = Math.min(cap, sample(ax + ox, az + oz) + lift);
   positions.push(ax, y0, az, bx, y1, bz, bx + ox, y2, bz + oz, ax, y0, az, bx + ox, y2, bz + oz, ax + ox, y3, az + oz);
 }
 
-function addShores(group, rings, sample, box) {
+function addShores(group, rings, sample, box, waterY = 0.9) {
   const gravel = [];
   const wet = [];
   for (const ring of rings) {
@@ -981,8 +1015,8 @@ function addShores(group, rings, sample, box) {
         const bz = a[1] + dz * t1;
         const ox = (dz / len) * 8.5;
         const oz = (-dx / len) * 8.5;
-        pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.2);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, sample, 0.28);
+        pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.12, waterY + 0.35);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, () => waterY, 0.02, waterY + 0.08);
       }
     }
   }
@@ -1021,6 +1055,12 @@ export async function buildCity(data, projector, hooks = {}) {
   const carriageways = makeLineIndex(roads.centerlines);
   const wallBuckets = WALLS.map(() => ({ plain: [], windows: [] }));
   const roofBuckets = ROOFS.map(() => []);
+  const extraWalls = new Map();
+  const extraRoofs = new Map();
+  const extraBucket = (map, color) => {
+    if (!map.has(color)) map.set(color, []);
+    return map.get(color);
+  };
   const styledParts = Object.fromEntries(Object.keys(FACADE).map((name) => [name, { walls: [], roofs: [] }]));
   const doorParts = [];
   const walkParts = [];
@@ -1043,6 +1083,8 @@ export async function buildCity(data, projector, hooks = {}) {
     const colorKey = String(tags.osmId ?? tags.name ?? '');
     const wallIndex = hashId(colorKey) % WALLS.length;
     const roofIndex = hashId(`${colorKey}:roof`) % ROOFS.length;
+    const taggedWall = wallColorFor(tags, null);
+    const taggedRoof = roofColorFor(tags, null);
     const name = niceName(tags.name);
     const styleName = landmarkKey(tags);
     let placed = false;
@@ -1066,7 +1108,11 @@ export async function buildCity(data, projector, hooks = {}) {
       const shape = String(tags['roof:shape'] || '');
       const area = Math.abs(signedArea(outer));
       const pitched = !holes.length && top >= 5 && area >= 48 && shape !== 'flat' && shape !== 'skillion' && convexOpen(outer);
-      const roofTarget = styleName ? styledParts[styleName].roofs : roofBuckets[roofIndex];
+      const roofTarget = styleName
+        ? styledParts[styleName].roofs
+        : taggedRoof
+          ? extraBucket(extraRoofs, taggedRoof)
+          : roofBuckets[roofIndex];
       if (pitched) {
         const rise = Math.min(4.6, Math.max(1.6, Math.sqrt(area) * 0.22));
         const hip = pyramidRoof(outer, sample, top, rise);
@@ -1082,6 +1128,7 @@ export async function buildCity(data, projector, hooks = {}) {
       const walls = geometryFromParts(strips);
       if (walls) {
         if (styleName) styledParts[styleName].walls.push(walls);
+        else if (taggedWall) extraBucket(extraWalls, taggedWall).push(walls);
         else {
           const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
           bucket.push(walls);
@@ -1100,7 +1147,7 @@ export async function buildCity(data, projector, hooks = {}) {
         blocksCamera: true,
         ...bounds,
       });
-      if (styleName && FACADE[styleName].tower && area > 40) {
+      if (styleName && FACADE[styleName].tower && area > 18) {
         const [tx, tz] = towerPoint(outer);
         towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area, tower: FACADE[styleName].tower });
       }
@@ -1127,6 +1174,8 @@ export async function buildCity(data, projector, hooks = {}) {
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
 
+  const basins = [];
+  const riverHeights = [];
   for (const feature of water.features || []) {
     const tags = feature.properties || {};
     if (feature.geometry?.type === 'LineString') {
@@ -1142,26 +1191,53 @@ export async function buildCity(data, projector, hooks = {}) {
         const hole = orient(clipPolygon(projectRing(coords[i], projector), ...box), false);
         if (hole) holes.push(hole);
       }
-      const flat = triangulate(densify(outer.concat([outer[0]]), 12).slice(0, -1), holes.map((hole) => densify(hole.concat([hole[0]]), 12).slice(0, -1)), 0, 1);
-      if (flat) {
-        waterParts.push(conformSurface(flat, sample, 0.1));
-        stats.water += 1;
-      }
-      if (tags.water === 'river') shoreRings.push(outer);
+      const edge = densify(outer.concat([outer[0]]), 8);
+      const samples = [];
+      for (const p of edge) samples.push(sample(p[0], p[1]));
+      samples.sort((a, b) => a - b);
+      const level = samples.length ? samples[Math.max(0, Math.floor(samples.length * 0.18))] : 0.8;
+      const river = tags.water === 'river' || tags.waterway === 'river' || /Labe|Bílina|Bilina/i.test(tags.name || '');
+      if (river) riverHeights.push(level);
+      basins.push({ outer, holes, y: level, river, name: tags.name || '' });
+      if (river) shoreRings.push(outer);
       if (tags.name && feature.geometry?.type !== 'LineString') {
         rememberLine(riverLabels, tags.name, outer.concat([outer[0]]), sample, 9);
       }
-      const closedOuter = outer.concat([outer[0]]);
-      const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
-      const bounds = polygonBounds([closedOuter, ...closedHoles]);
-      blockers.push({
-        outer: closedOuter,
-        holes: closedHoles,
-        top: 0.2,
-        blocksWalk: true,
-        blocksCamera: false,
-        ...bounds,
-      });
+    });
+  }
+  const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
+  for (const basin of basins) {
+    if (basin.river) basin.y = riverY;
+    const holes = basin.holes;
+    const flat = triangulate(
+      densify(basin.outer.concat([basin.outer[0]]), 14).slice(0, -1),
+      holes.map((hole) => densify(hole.concat([hole[0]]), 14).slice(0, -1)),
+      basin.y,
+      1,
+    );
+    if (flat) {
+      const pos = flat.positions;
+      for (let i = 1; i < pos.length; i += 3) pos[i] = basin.y;
+      const nrm = flat.normals;
+      for (let i = 0; i < nrm.length; i += 3) {
+        nrm[i] = 0;
+        nrm[i + 1] = 1;
+        nrm[i + 2] = 0;
+      }
+      waterParts.push(flat);
+      stats.water += 1;
+    }
+    const closedOuter = basin.outer.concat([basin.outer[0]]);
+    const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
+    const bounds = polygonBounds([closedOuter, ...closedHoles]);
+    blockers.push({
+      outer: closedOuter,
+      holes: closedHoles,
+      top: basin.y,
+      blocksWalk: true,
+      blocksCamera: false,
+      kind: 'water',
+      ...bounds,
     });
   }
 
@@ -1210,6 +1286,14 @@ export async function buildCity(data, projector, hooks = {}) {
     if (!geometry) return;
     group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })));
   });
+  for (const [color, parts] of extraWalls) {
+    const geometry = mergeList(parts);
+    if (geometry) group.add(new THREE.Mesh(geometry, facadeMaterial(color)));
+  }
+  for (const [color, parts] of extraRoofs) {
+    const geometry = mergeList(parts);
+    if (geometry) group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })));
+  }
   for (const [name, parts] of Object.entries(styledParts)) {
     const style = FACADE[name];
     const walls = mergeList(parts.walls);
@@ -1240,7 +1324,7 @@ export async function buildCity(data, projector, hooks = {}) {
     band.position.set(tower.x, tower.y + height * 0.72, tower.z);
     group.add(shaft, cap, band);
   }
-  addShores(group, shoreRings, sample, box);
+  addShores(group, shoreRings, sample, box, riverY);
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
@@ -1289,6 +1373,24 @@ export async function buildCity(data, projector, hooks = {}) {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     });
+    waterMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.uniforms.uNight = { value: 0 };
+      waterMaterial.userData.shader = shader;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWorld;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWorld;\nuniform float uTime;\nuniform float uNight;')
+        .replace(
+          '#include <lights_phong_fragment>',
+          `#include <lights_phong_fragment>
+          float spark = 0.5 + 0.5 * sin(vWorld.x * 0.07 + vWorld.z * 0.05 + uTime * 0.55);
+          spark *= 0.5 + 0.5 * sin(vWorld.x * 0.028 - vWorld.z * 0.04);
+          reflectedLight.indirectSpecular += vec3(0.07, 0.11, 0.13) * spark * (0.16 + uNight * 0.5);`,
+        );
+    };
+    waterMaterial.customProgramCacheKey = () => 'usti-water-flat-v1';
     const waterObject = new THREE.Mesh(waterMesh, waterMaterial);
     waterObject.name = 'water';
     waterObject.userData.noShadow = true;
@@ -1333,7 +1435,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial };
+  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins };
 }
 
 function makeCollision(blockers, projector) {
@@ -1356,7 +1458,29 @@ function makeCollision(blockers, projector) {
       }
     }
   });
-  return { blockers, cell, grid, projector };
+  return { blockers, cell, grid, projector, decks: [], rails: [] };
+}
+
+export function addBlocker(collision, poly) {
+  if (!collision || !poly) return;
+  const index = collision.blockers.length;
+  collision.blockers.push(poly);
+  const { cell, grid } = collision;
+  const minIx = Math.floor(poly.minX / cell);
+  const maxIx = Math.floor(poly.maxX / cell);
+  const minIz = Math.floor(poly.minZ / cell);
+  const maxIz = Math.floor(poly.maxZ / cell);
+  for (let ix = minIx; ix <= maxIx; ix++) {
+    for (let iz = minIz; iz <= maxIz; iz++) {
+      const key = `${ix},${iz}`;
+      let list = grid.get(key);
+      if (!list) {
+        list = [];
+        grid.set(key, list);
+      }
+      list.push(index);
+    }
+  }
 }
 
 function polysNear(collision, x, z, pad) {
@@ -1406,11 +1530,47 @@ export function walkBlocked(collision, x, z, radius) {
   if (x < projector.minX + radius || x > projector.maxX - radius || z < projector.minZ + radius || z > projector.maxZ - radius) {
     return true;
   }
+  const deck = onDeck(collision.decks, x, z, radius);
   for (const poly of polysNear(collision, x, z, radius + 2)) {
     if (!poly.blocksWalk) continue;
+    if (deck && (poly.kind === 'water' || poly.kind === 'track')) continue;
     if (hitsPoly(x, z, radius, poly)) return true;
   }
+  if (!deck) {
+    for (const poly of collision.rails || []) {
+      if (poly.kind === 'track' && hitsPoly(x, z, radius, poly)) return true;
+    }
+  } else {
+    for (const poly of collision.rails || []) {
+      if (poly.kind === 'rail' && hitsPoly(x, z, 0.12, poly)) return true;
+    }
+  }
   return false;
+}
+
+export function walkHeight(collision, x, z, ground) {
+  if (!collision) return ground;
+  const deck = onDeck(collision.decks, x, z, 0.45);
+  return deck ? Math.max(ground, deck.y) : ground;
+}
+
+export function sinkGround(geometry, basins) {
+  if (!geometry?.attributes?.position || !basins?.length) return;
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    for (const basin of basins) {
+      if (!pointInRing(x, z, basin.outer)) continue;
+      let hole = false;
+      for (const ring of basin.holes) {
+        if (pointInRing(x, z, ring)) hole = true;
+      }
+      if (!hole) pos.setY(i, Math.min(pos.getY(i), basin.y - 1.2));
+    }
+  }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
 }
 
 function segIntersect(x1, z1, x2, z2, x3, z3, x4, z4) {
