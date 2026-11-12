@@ -17,6 +17,10 @@ const themes = [
     'water',
     `way["natural"="water"](${b});relation["natural"="water"](${b});way["waterway"~"^(riverbank|river|dock)$"](${b});relation["waterway"~"^(riverbank|river)$"](${b});`,
   ],
+  [
+    'trees',
+    `node["natural"="tree"](${b});way["natural"="tree_row"](${b});way["natural"="wood"](${b});relation["natural"="wood"](${b});way["leisure"="park"](${b});relation["leisure"="park"](${b});`,
+  ],
 ];
 
 const endpoints = [
@@ -184,9 +188,25 @@ function convertTheme(name, elements) {
       skipped += 1;
       continue;
     }
+    if (el.type === 'node') {
+      if (name === 'trees' && Number.isFinite(el.lon) && Number.isFinite(el.lat)) {
+        features.push({
+          type: 'Feature',
+          properties: propsOf(el),
+          geometry: { type: 'Point', coordinates: [el.lon, el.lat] },
+        });
+      } else skipped += 1;
+      continue;
+    }
     if (el.type === 'way') {
       const coords = wayCoords(el);
       const closed = isClosed(coords);
+      if (name === 'trees') {
+        const feature = tags.natural === 'tree_row' || !closed ? lineFeature(el, coords) : polygonFeature(el, [{ outer: coords, holes: [] }]);
+        if (feature) features.push(feature);
+        else skipped += 1;
+        continue;
+      }
       if (name === 'highways') {
         const feature = lineFeature(el, coords);
         if (feature) features.push(feature);
@@ -565,13 +585,18 @@ if (process.argv.includes('--terrain-only')) {
 
 console.log(`BBox WGS84: ${bbox.west}, ${bbox.south} – ${bbox.east}, ${bbox.north}`);
 
+const onlyArg = process.argv.find((arg) => arg.startsWith('--only='));
+const only = onlyArg ? onlyArg.slice('--only='.length).split(',').filter(Boolean) : null;
+const selectedThemes = only ? themes.filter(([name]) => only.includes(name)) : themes;
+if (only && !selectedThemes.length) throw new Error(`Neznámé téma v --only (${only.join(', ')})`);
+
 let osmTimestamp = null;
 let osmCopyright = null;
 let overpassUrl = null;
 const counts = {};
 const skipped = {};
 
-for (const [name, body] of themes) {
+for (const [name, body] of selectedThemes) {
   const query = `[out:json][timeout:120];(${body});out geom;`;
   console.log(`OSM ${name}…`);
   const { json, url } = await overpass(query);
@@ -585,8 +610,24 @@ for (const [name, body] of themes) {
   console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
 }
 
-if ((counts.buildings || 0) < 50) {
+if (!only && (counts.buildings || 0) < 50) {
   throw new Error('Příliš málo budov — bbox nebo Overpass nevrátil centrum.');
+}
+
+if (only) {
+  const metaPath = path.join(dataDir, 'meta.json');
+  const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf8')) : { bbox };
+  meta.counts = { ...(meta.counts || {}), ...counts };
+  meta.skipped = { ...(meta.skipped || {}), ...skipped };
+  if (osmTimestamp) {
+    meta.themeTimestamps = { ...(meta.themeTimestamps || {}) };
+    for (const name of only) meta.themeTimestamps[name] = osmTimestamp;
+  }
+  if (osmCopyright) meta.osmCopyright = osmCopyright;
+  if (overpassUrl) meta.overpassUrl = overpassUrl;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  console.log(JSON.stringify({ counts, skipped }, null, 2));
+  process.exit(0);
 }
 
 const ortho = await downloadOrtho();

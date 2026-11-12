@@ -9,23 +9,15 @@ import {
   distPointSeg,
   eachPolygon,
   pointInRing,
-  roadWidth,
   signedArea,
   startPreference,
+  windowRows,
 } from './geom.js';
+import { buildRoadGeometry, makeLineIndex } from './roads.js';
 
-const WALLS = [0xf7e7c4, 0xf3d48f, 0xf8f1e2, 0xe8c07a, 0xf6d7b0, 0xf4e0c4, 0xedd0a4, 0xf6efe2, 0xe4c49a, 0xf0c8a4, 0xf8e6d0, 0xe9d2b2];
+const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
 const ROOFS = [0xd4653a, 0xc4512c, 0xe07040, 0xb8432a, 0xcc5a34, 0xa84830, 0x8d4a3c, 0x5c646c];
-const WALK_WIDTH = {
-  footway: 2.2,
-  path: 1.8,
-  steps: 1.5,
-  pedestrian: 8,
-  living_street: 5.2,
-};
-const ORDINARY = new Set(['residential', 'unclassified', 'tertiary', 'secondary', 'primary', 'road', 'busway']);
 const PARKISH = new Set(['park', 'forest', 'recreation_ground', 'grass', 'village_green', 'meadow', 'garden', 'cemetery']);
-const SIDEWALK = 1.65;
 
 function hashId(value) {
   const text = String(value ?? '');
@@ -66,11 +58,12 @@ function triangulate(outer, holes, y, normalY) {
   return positions.length ? { positions, normals } : null;
 }
 
-function wallStrip(ring, groundAt, base, top) {
+function wallStrip(ring, groundAt, base, top, floors = 3) {
   const positions = [];
   const normals = [];
   const uvs = [];
   const span = Math.max(2.4, top - base);
+  const rows = Math.max(1, floors);
   let acc = 0;
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i];
@@ -94,23 +87,25 @@ function wallStrip(ring, groundAt, base, top) {
       const y1 = groundAt(bx, bz) + base;
       positions.push(ax, y0, az, bx, y1, bz, bx, y1 + span, bz, ax, y0, az, bx, y1 + span, bz, ax, y0 + span, az);
       for (let k = 0; k < 6; k++) normals.push(nx, 0, nz);
-      uvs.push(acc, 0, acc + seg, 0, acc + seg, span, acc, 0, acc + seg, span, acc, span);
+      uvs.push(acc, 0, acc + seg, 0, acc + seg, rows, acc, 0, acc + seg, rows, acc, rows);
       acc += seg;
     }
   }
   return positions.length ? { positions, normals, uvs } : null;
 }
 
-function doorStrip(ring, groundAt, base, top) {
+function doorStrip(ring, groundAt, base, top, edgeIndex = null) {
   let best = null;
-  for (let i = 0; i < ring.length; i++) {
+  const consider = (i) => {
     const a = ring[i];
     const b = ring[(i + 1) % ring.length];
     const dx = b[0] - a[0];
     const dz = b[1] - a[1];
     const len = Math.hypot(dx, dz);
     if (!best || len > best.len) best = { a, b, dx, dz, len };
-  }
+  };
+  if (Number.isInteger(edgeIndex)) consider(edgeIndex);
+  else for (let i = 0; i < ring.length; i++) consider(i);
   if (!best || best.len < 2.2) return null;
   const low = top - base < 4.4;
   const doorW = Math.min(low ? 2.6 : 1.45, best.len * (low ? 0.72 : 0.5));
@@ -298,123 +293,6 @@ function densify(points, step) {
   return out;
 }
 
-function cleanLine(points) {
-  const out = [];
-  for (const p of points || []) {
-    if (!out.length || Math.hypot(p[0] - out[out.length - 1][0], p[1] - out[out.length - 1][1]) > 0.45) out.push(p);
-  }
-  return out.length >= 2 ? out : null;
-}
-
-function lineDirs(pts) {
-  const dirs = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const dx = pts[i + 1][0] - pts[i][0];
-    const dz = pts[i + 1][1] - pts[i][1];
-    const len = Math.hypot(dx, dz) || 1;
-    dirs.push([dx / len, dz / len]);
-  }
-  return dirs;
-}
-
-function ribbonStations(pts, half) {
-  const dirs = lineDirs(pts);
-  const left = [];
-  const right = [];
-  const station = (i, dir, scale = 1) => {
-    const nx = -dir[1] * half * scale;
-    const nz = dir[0] * half * scale;
-    left.push([pts[i][0] + nx, pts[i][1] + nz]);
-    right.push([pts[i][0] - nx, pts[i][1] - nz]);
-  };
-  station(0, dirs[0]);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const d0 = dirs[i - 1];
-    const d1 = dirs[i];
-    const dot = d0[0] * d1[0] + d0[1] * d1[1];
-    if (dot < 0.72) {
-      station(i, d0);
-      station(i, d1);
-      continue;
-    }
-    let nx = -d0[1] - d1[1];
-    let nz = d0[0] + d1[0];
-    const len = Math.hypot(nx, nz) || 1;
-    nx /= len;
-    nz /= len;
-    const along = Math.max(0.62, nx * -d0[1] + nz * d0[0]);
-    station(i, [nz, -nx], Math.min(1.2, 1 / along));
-  }
-  station(pts.length - 1, dirs[dirs.length - 1]);
-  return { left, right };
-}
-
-function addRibbon(parts, line, half, sample, lift) {
-  if (!(half > 0.15)) return false;
-  const pts = densify(cleanLine(line), 5);
-  if (!pts || pts.length < 2) return false;
-  const { left, right } = ribbonStations(pts, half);
-  const positions = [];
-  const normals = [];
-  for (let i = 0; i < left.length - 1; i++) {
-    const quad = [left[i], right[i], right[i + 1], left[i + 1]];
-    positions.push(
-      quad[0][0], 0, quad[0][1],
-      quad[1][0], 0, quad[1][1],
-      quad[2][0], 0, quad[2][1],
-      quad[0][0], 0, quad[0][1],
-      quad[2][0], 0, quad[2][1],
-      quad[3][0], 0, quad[3][1],
-    );
-    for (let k = 0; k < 6; k++) normals.push(0, 1, 0);
-  }
-  if (!positions.length) return false;
-  parts.push(conformSurface({ positions, normals }, sample, lift));
-  return true;
-}
-
-function offsetLine(points, dist) {
-  const pts = cleanLine(points);
-  if (!pts) return null;
-  const dirs = lineDirs(pts);
-  const out = [];
-  const push = (i, dir, scale = 1) => {
-    out.push([pts[i][0] + -dir[1] * dist * scale, pts[i][1] + dir[0] * dist * scale]);
-  };
-  push(0, dirs[0]);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const d0 = dirs[i - 1];
-    const d1 = dirs[i];
-    const dot = d0[0] * d1[0] + d0[1] * d1[1];
-    if (dot < 0.72) {
-      push(i, d0);
-      push(i, d1);
-      continue;
-    }
-    let nx = -d0[1] - d1[1];
-    let nz = d0[0] + d1[0];
-    const len = Math.hypot(nx, nz) || 1;
-    push(i, [nz / len, -nx / len], Math.min(1.2, 1 / Math.max(0.62, (nx / len) * -d0[1] + (nz / len) * d0[0])));
-  }
-  push(pts.length - 1, dirs[dirs.length - 1]);
-  return out;
-}
-
-function sideOn(tags, side, key) {
-  const specific = tags[`sidewalk:${side}`];
-  if (specific != null && specific !== '') {
-    const value = String(specific);
-    return value !== 'no' && value !== 'none' && value !== 'separate';
-  }
-  if (tags.sidewalk != null && tags.sidewalk !== '') {
-    const value = String(tags.sidewalk);
-    if (value === 'no' || value === 'none' || value === 'separate') return false;
-    if (value === 'both' || value === 'yes') return true;
-    return value === side;
-  }
-  return ORDINARY.has(key);
-}
-
 function midpointOf(part) {
   let len = 0;
   for (let i = 1; i < part.length; i++) {
@@ -497,10 +375,13 @@ function facadeOnBeforeCompile(shader) {
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
-      float fx = mod(vFacadeUv.x, 2.75);
-      float fy = mod(vFacadeUv.y, 3.0);
-      float pane = step(0.58, fx) * step(fx, 2.18) * step(0.95, fy) * step(fy, 2.42);
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.32, 0.42), pane * 0.78);`,
+      float fx = mod(vFacadeUv.x, 3.05);
+      float fy = fract(vFacadeUv.y);
+      float pane = step(0.48, fx) * step(fx, 2.4) * step(0.28, fy) * step(fy, 0.74);
+      float course = step(fy, 0.05);
+      vec3 glass = vec3(0.22, 0.33, 0.4);
+      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.8);
+      diffuseColor.rgb *= mix(1.0, 0.8, course);`,
     );
 }
 
@@ -560,7 +441,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v2';
+  material.customProgramCacheKey = () => 'usti-facade-v3';
   return material;
 }
 
@@ -666,10 +547,274 @@ function makeSeatedGuest(shirtColor, hairColor) {
   return guest;
 }
 
+function streetEdge(ring, roads) {
+  let best = null;
+  let longest = 0;
+  let longestIndex = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len > longest) {
+      longest = len;
+      longestIndex = i;
+    }
+    if (len < 2.2) continue;
+    const mx = (a[0] + b[0]) / 2;
+    const mz = (a[1] + b[1]) / 2;
+    const hit = roads.query(mx, mz, 36);
+    if (!hit) continue;
+    const nx = dz / len;
+    const nz = -dx / len;
+    const vx = hit.x - mx;
+    const vz = hit.z - mz;
+    const dist = Math.hypot(vx, vz) || 1;
+    if ((vx * nx + vz * nz) / dist < 0.2) continue;
+    const score = dist - Math.min(len, 22) * 0.03;
+    if (!best || score < best.score) best = { index: i, score };
+  }
+  return best ? best.index : longestIndex;
+}
+
+function drapeFlat(flat, sample, lift, parts) {
+  const positions = [];
+  const normals = [];
+  for (let i = 0; i < flat.length; i += 6) {
+    const tri = [];
+    for (let k = 0; k < 3; k++) {
+      const x = flat[i + k * 2];
+      const z = flat[i + k * 2 + 1];
+      tri.push([x, sample(x, z) + lift, z]);
+    }
+    let [a, b, c] = tri;
+    const abx = b[0] - a[0];
+    const abz = b[2] - a[2];
+    const acx = c[0] - a[0];
+    const acz = c[2] - a[2];
+    if (abz * acx - abx * acz < 0) {
+      const swap = b;
+      b = c;
+      c = swap;
+    }
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const uz = b[2] - a[2];
+    const vx = c[0] - a[0];
+    const vy = c[1] - a[1];
+    const vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
+  }
+  if (positions.length) parts.push({ positions, normals });
+}
+
+function coverIndex(polys) {
+  const cell = 48;
+  const grid = new Map();
+  polys.forEach((poly, index) => {
+    const minIx = Math.floor(poly.minX / cell);
+    const maxIx = Math.floor(poly.maxX / cell);
+    const minIz = Math.floor(poly.minZ / cell);
+    const maxIz = Math.floor(poly.maxZ / cell);
+    for (let ix = minIx; ix <= maxIx; ix++) {
+      for (let iz = minIz; iz <= maxIz; iz++) {
+        const key = `${ix},${iz}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(index);
+      }
+    }
+  });
+  return function blocked(x, z) {
+    const list = grid.get(`${Math.floor(x / cell)},${Math.floor(z / cell)}`) || [];
+    for (const index of list) {
+      const poly = polys[index];
+      if (!pointInRing(x, z, poly.outer)) continue;
+      let hole = false;
+      for (const h of poly.holes) {
+        if (pointInRing(x, z, h)) {
+          hole = true;
+          break;
+        }
+      }
+      if (!hole) return true;
+    }
+    return false;
+  };
+}
+
+function treeUnit(salt, x, z) {
+  let h = Math.imul((Math.round(x * 10) ^ Math.imul(Math.round(z * 10), 0x9e3779b1) ^ salt) >>> 0, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h >>> 0) / 4294967296;
+}
+
+function canopyGeometry() {
+  const positions = [];
+  const pushCone = (y0, y1, radius, sides) => {
+    for (let i = 0; i < sides; i++) {
+      const a0 = (i / sides) * Math.PI * 2;
+      const a1 = ((i + 1) / sides) * Math.PI * 2;
+      positions.push(0, y1, 0, Math.cos(a0) * radius, y0, Math.sin(a0) * radius, Math.cos(a1) * radius, y0, Math.sin(a1) * radius);
+    }
+  };
+  pushCone(0, 0.62, 1, 6);
+  pushCone(0.4, 1.02, 0.58, 6);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addTrees(group, data, projector, sample, roads, blockers) {
+  const blocked = coverIndex(blockers);
+  const points = [];
+  const occupied = new Set();
+  const claim = (x, z) => {
+    const key = `${Math.round(x / 4.4)},${Math.round(z / 4.4)}`;
+    if (occupied.has(key)) return false;
+    occupied.add(key);
+    return true;
+  };
+  const place = (x, z, extra) => {
+    if (x < projector.minX + 3 || x > projector.maxX - 3 || z < projector.minZ + 3 || z > projector.maxZ - 3) return;
+    const hit = roads.query(x, z, 28);
+    if (hit && hit.dist < hit.half + extra) return;
+    if (blocked(x, z)) return;
+    if (!claim(x, z)) return;
+    const roll = treeUnit(1, x, z);
+    points.push({
+      x,
+      z,
+      y: sample(x, z),
+      scale: 0.82 + roll * 0.55,
+      rot: treeUnit(2, x, z) * Math.PI * 2,
+      tint: treeUnit(3, x, z),
+    });
+  };
+  const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
+  const scatterArea = (feature, spacing) => {
+    eachPolygon(feature.geometry, (coords) => {
+      if (!coords?.[0]) return;
+      const outer = orient(clipPolygon(projectRing(coords[0], projector), ...box), true);
+      if (!outer) return;
+      const holes = [];
+      for (let i = 1; i < coords.length; i++) {
+        const hole = orient(clipPolygon(projectRing(coords[i], projector), ...box), false);
+        if (hole) holes.push(hole);
+      }
+      const area = Math.abs(signedArea(outer));
+      if (area < 80) return;
+      let step = spacing;
+      if (area / (step * step) > 620) step = Math.sqrt(area / 620);
+      const bounds = polygonBounds([outer]);
+      for (let x = bounds.minX + step * 0.5; x < bounds.maxX; x += step) {
+        for (let z = bounds.minZ + step * 0.5; z < bounds.maxZ; z += step) {
+          const jx = x + (treeUnit(4, x, z) - 0.5) * step * 0.7;
+          const jz = z + (treeUnit(5, x, z) - 0.5) * step * 0.7;
+          if (!pointInRing(jx, jz, outer)) continue;
+          let hole = false;
+          for (const ring of holes) {
+            if (pointInRing(jx, jz, ring)) hole = true;
+          }
+          if (!hole) place(jx, jz, 4.4);
+        }
+      }
+    });
+  };
+  for (const feature of data.trees?.features || []) {
+    const tags = feature.properties || {};
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    if (geometry.type === 'Point' && tags.natural === 'tree') {
+      const [x, z] = projector.toLocal(geometry.coordinates[0], geometry.coordinates[1]);
+      place(x, z, -0.35);
+      continue;
+    }
+    if (geometry.type === 'LineString' && tags.natural === 'tree_row') {
+      const local = projectRing(geometry.coordinates, projector);
+      for (const part of clipPolyline(local, ...box)) {
+        let acc = 6;
+        for (let i = 1; i < part.length; i++) {
+          const len = Math.hypot(part[i][0] - part[i - 1][0], part[i][1] - part[i - 1][1]);
+          let walked = 0;
+          while (acc + walked <= len) {
+            const t = len ? (acc + walked) / len : 0;
+            place(
+              part[i - 1][0] + (part[i][0] - part[i - 1][0]) * t,
+              part[i - 1][1] + (part[i][1] - part[i - 1][1]) * t,
+              -0.2,
+            );
+            walked += 8;
+          }
+          acc = acc + walked - len;
+        }
+      }
+      continue;
+    }
+    if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
+      const park = tags.leisure === 'park';
+      const wood = tags.natural === 'wood' || tags.landuse === 'forest';
+      if (park || wood) scatterArea(feature, park ? 8.2 : 11);
+    }
+  }
+  for (const feature of data.landuse?.features || []) {
+    if (feature.properties?.landuse === 'forest') scatterArea(feature, 11);
+  }
+  if (!points.length) return 0;
+  const greens = [0x2e6b34, 0x3d7c3c, 0x4d8c42, 0x255e30, 0x5a9346];
+  const trunks = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.1, 0.16, 1, 5).translate(0, 0.5, 0),
+    new THREE.MeshLambertMaterial({ color: 0x6a4b32 }),
+    points.length,
+  );
+  const canopy = new THREE.InstancedMesh(
+    canopyGeometry(),
+    new THREE.MeshLambertMaterial({ color: 0xffffff }),
+    points.length,
+  );
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  points.forEach((point, index) => {
+    const trunkH = 1.45 + point.scale * 1.05;
+    const canopyH = 2.15 + point.scale * 1.45;
+    const radius = 1.05 + point.scale * 0.85;
+    dummy.rotation.set(0, point.rot, 0);
+    dummy.position.set(point.x, point.y, point.z);
+    dummy.scale.set(1, trunkH, 1);
+    dummy.updateMatrix();
+    trunks.setMatrixAt(index, dummy.matrix);
+    dummy.position.y = point.y + trunkH * 0.86;
+    dummy.scale.set(radius, canopyH, radius);
+    dummy.updateMatrix();
+    canopy.setMatrixAt(index, dummy.matrix);
+    color.setHex(greens[Math.floor(point.tint * greens.length) % greens.length]);
+    canopy.setColorAt(index, color);
+  });
+  trunks.instanceMatrix.needsUpdate = true;
+  canopy.instanceMatrix.needsUpdate = true;
+  if (canopy.instanceColor) canopy.instanceColor.needsUpdate = true;
+  const grove = new THREE.Group();
+  grove.name = 'trees';
+  grove.add(trunks, canopy);
+  group.add(grove);
+  return points.length;
+}
+
 export function buildCity(data, projector) {
   const { buildings, highways, water } = data;
   const sample = data.terrain?.sample || (() => 0);
-  const wallBuckets = WALLS.map(() => []);
+  const roads = buildRoadGeometry(highways.features || [], projector);
+  const carriageways = makeLineIndex(roads.centerlines);
+  const wallBuckets = WALLS.map(() => ({ plain: [], windows: [] }));
   const roofBuckets = ROOFS.map(() => []);
   const doorParts = [];
   const walkParts = [];
@@ -681,7 +826,7 @@ export function buildCity(data, projector) {
   const buildingLabels = new Map();
   const streetLabels = new Map();
   const riverLabels = new Map();
-  const stats = { buildings: 0, skippedBuildings: 0, roads: 0, sidewalks: 0, water: 0, labels: 0 };
+  const stats = { buildings: 0, skippedBuildings: 0, roads: 0, sidewalks: 0, water: 0, labels: 0, trees: 0 };
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
 
   for (const feature of buildings.features || []) {
@@ -702,11 +847,12 @@ export function buildCity(data, projector) {
         const hole = orient(clipPolygon(projectRing(coords[i], projector), ...box), false);
         if (hole) holes.push(hole);
       }
+      const rows = windowRows(tags, top, base);
       const strips = [];
-      const outerWall = wallStrip(outer, sample, base, top);
+      const outerWall = wallStrip(outer, sample, base, top, Math.max(1, rows));
       if (outerWall) strips.push(outerWall);
       for (const hole of holes) {
-        const innerWall = wallStrip(hole, sample, base, top);
+        const innerWall = wallStrip(hole, sample, base, top, Math.max(1, rows));
         if (innerWall) strips.push(innerWall);
       }
       const shape = String(tags['roof:shape'] || '');
@@ -725,8 +871,11 @@ export function buildCity(data, projector) {
         }
       }
       const walls = geometryFromParts(strips);
-      if (walls) wallBuckets[wallIndex].push(walls);
-      const door = doorStrip(outer, sample, base, top);
+      if (walls) {
+        const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
+        bucket.push(walls);
+      }
+      const door = doorStrip(outer, sample, base, top, streetEdge(outer, carriageways));
       if (door) doorParts.push(door);
       const closedOuter = outer.concat([outer[0]]);
       const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
@@ -753,43 +902,12 @@ export function buildCity(data, projector) {
     else stats.skippedBuildings += 1;
   }
 
-  for (const feature of highways.features || []) {
-    const tags = feature.properties || {};
-    if (feature.geometry?.type !== 'LineString') continue;
-    const key = String(tags.highway || '').replace(/_link$/, '');
-    const local = projectRing(feature.geometry.coordinates, projector);
-    const parts = clipPolyline(local, ...box);
-    for (const part of parts) {
-      rememberLine(streetLabels, tags.name, part, sample, 4.2);
-      const walk = WALK_WIDTH[key];
-      if (walk) {
-        const paving = key === 'pedestrian' || key === 'living_street';
-        let half = walk / 2;
-        if (key === 'pedestrian') {
-          let len = 0;
-          for (let i = 1; i < part.length; i++) len += Math.hypot(part[i][0] - part[i - 1][0], part[i][1] - part[i - 1][1]);
-          if (len > 90) half = 17;
-        }
-        if (addRibbon(paving ? paveParts : walkParts, part, half, sample, paving ? 0.22 : 0.16)) stats.sidewalks += 1;
-        continue;
-      }
-      const width = roadWidth(tags.highway);
-      if (!width) continue;
-      const left = sideOn(tags, 'left', key);
-      const right = sideOn(tags, 'right', key);
-      if (left && right) {
-        if (addRibbon(walkParts, part, width / 2 + SIDEWALK, sample, 0.12)) stats.sidewalks += 1;
-      } else {
-        if (left && addRibbon(walkParts, offsetLine(part, width / 2 + SIDEWALK / 2), SIDEWALK / 2, sample, 0.12)) {
-          stats.sidewalks += 1;
-        }
-        if (right && addRibbon(walkParts, offsetLine(part, -(width / 2 + SIDEWALK / 2)), SIDEWALK / 2, sample, 0.12)) {
-          stats.sidewalks += 1;
-        }
-      }
-      if (addRibbon(asphaltParts, part, width / 2, sample, 0.28)) stats.roads += 1;
-    }
-  }
+  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
+  drapeFlat(roads.walk, sample, 0.14, walkParts);
+  drapeFlat(roads.pave, sample, 0.22, paveParts);
+  stats.roads = roads.stats.chains;
+  stats.sidewalks = roads.stats.sidewalkRuns;
+  for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
 
   for (const feature of water.features || []) {
     const tags = feature.properties || {};
@@ -857,12 +975,15 @@ export function buildCity(data, projector) {
   group.name = 'city';
 
   WALLS.forEach((color, index) => {
-    const geometry = mergeList(wallBuckets[index]);
-    if (!geometry) return;
-    const mesh = new THREE.Mesh(geometry, facadeMaterial(color));
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    group.add(mesh);
+    const windows = mergeList(wallBuckets[index].windows);
+    if (windows) {
+      const mesh = new THREE.Mesh(windows, facadeMaterial(color));
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      group.add(mesh);
+    }
+    const plain = mergeList(wallBuckets[index].plain);
+    if (plain) group.add(new THREE.Mesh(plain, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })));
   });
   ROOFS.forEach((color, index) => {
     const geometry = mergeList(roofBuckets[index]);
@@ -871,7 +992,7 @@ export function buildCity(data, projector) {
   });
   const doors = geometryFromParts(doorParts);
   if (doors) {
-    group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x6a4632, side: THREE.DoubleSide })));
+    group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
   }
 
   const parks = geometryFromParts(parkParts);
@@ -970,6 +1091,7 @@ export function buildCity(data, projector) {
     group.add(sprite);
   };
 
+  stats.trees = addTrees(group, data, projector, sample, carriageways, blockers);
   const cafe = addCafeGarden(group, sample, projector);
   if (cafe) place(cafe.name, cafe.x, cafe.y, cafe.z);
 

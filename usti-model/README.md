@@ -1,6 +1,6 @@
 # Model Ústí — centrum
 
-Průchozí 3D model historického centra Ústí nad Labem. Půdorysy, ulice a jména jsou z OpenStreetMap, terén je DMR 5G a ortofoto ČÚZK. Chodí se pěšky, auta v téhle verzi nejsou.
+Průchozí 3D model historického centra Ústí nad Labem. Půdorysy, ulice, chodníky, stromy a jména jsou z OpenStreetMap, terén je DMR 5G a ortofoto ČÚZK. Chodí se pěšky, auta v téhle verzi nejsou.
 
 ## Spuštění
 
@@ -37,4 +37,4 @@ Viz `public/data/zdroje.md` (adresy, licence, datum, přesný bbox).
 
 ## Co v1 záměrně neumí
 
-Jednoduché výšky (tag `height`, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m), ploché střechy, společná fasáda s okny a dveřmi (ne textura adresy), kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.
+Jednoduché výšky (tag `height`, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m) a stejný počet řad oken. Dveře jsou na straně do ulice. Střechy jsou ploché nebo valbové, fasáda není fotografie adresy. Kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.

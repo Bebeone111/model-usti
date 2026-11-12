@@ -542,11 +542,12 @@ function addGround(texture, grid) {
 const DATA = '/data';
 
 async function boot() {
-  const [buildings, highways, landuse, water, meta, terrainJson, texture] = await Promise.all([
+  const [buildings, highways, landuse, water, trees, meta, terrainJson, texture] = await Promise.all([
     loadJson(`${DATA}/buildings.geojson`),
     loadJson(`${DATA}/highways.geojson`),
     loadJson(`${DATA}/landuse.geojson`),
     loadJson(`${DATA}/water.geojson`),
+    loadJson(`${DATA}/trees.geojson`),
     loadJson(`${DATA}/meta.json`),
     loadJson(`${DATA}/terrain.json`),
     new Promise((resolve, reject) => {
@@ -561,7 +562,7 @@ async function boot() {
   addGround(texture, terrain);
   statusEl.textContent = 'Sestavuji budovy…';
   await new Promise((resolve) => setTimeout(resolve, 40));
-  const city = buildCity({ buildings, highways, landuse, water, startHint: area.startHint, terrain }, projector);
+  const city = buildCity({ buildings, highways, landuse, water, trees, startHint: area.startHint, terrain }, projector);
   view.add(city.group);
   collision = city.collision;
   labels = city.labels;
