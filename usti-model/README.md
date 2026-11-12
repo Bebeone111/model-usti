@@ -13,7 +13,7 @@ Prohlížeč: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 Ovládání: **WASD** chůze (asi 3,6 m/s), **Shift** rychlý přesun (asi 280 m/s, centrum za pár sekund), **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši.
 
-Data už jsou ve složce `data/`. Znovu je stáhnete pomocí `npm run download` (potřebuje síť).
+Data už jsou ve složce `public/data/` (Vite je zkopíruje do sestavené aplikace na `/data/`). Znovu je stáhnete pomocí `npm run download` (potřebuje síť).
 
 ## Jak zvětšit oblast
 
@@ -33,7 +33,7 @@ Scéna se nemění. Počátek světa je střed bboxu, osa X míří na východ, 
 
 ## Data
 
-Viz `data/zdroje.md` (adresy, licence, datum, přesný bbox).
+Viz `public/data/zdroje.md` (adresy, licence, datum, přesný bbox).
 
 ## Co v1 záměrně neumí
 
