@@ -8,8 +8,9 @@
     <meta property="og:title" content="Model Ústí — centrum" />
     <meta property="og:description" content="Pěší 3D procházka centrem Ústí nad Labem podle OpenStreetMap a dat ČÚZK." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/og.jpg" />
+    <meta property="og:image" content="https://model-usti.apps.grok.bot/og.jpg" />
     <meta property="og:image:alt" content="Pohled na model centra Ústí nad Labem" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Model Ústí — centrum</title>
   </head>
@@ -94,15 +95,15 @@
         <h2>Jak se chodí</h2>
         <div id="help-desktop">
           <ul class="keys">
-            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> chůze, i bez zamčené myši</li>
-            <li><kbd>Shift</kbd> rychlejší chůze, asi čtyřnásobek</li>
-            <li><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> otáčení pohledu</li>
-            <li>myš rozhlíží, kliknutí kurzor zamkne, <kbd>Esc</kbd> ho pustí</li>
-            <li>kolečko mění odstup kamery</li>
-            <li><kbd>V</kbd> první a třetí osoba</li>
-            <li><kbd>M</kbd> mapa, <kbd>E</kbd> karta místa, <kbd>Mezerník</kbd> kde jsem</li>
-            <li><kbd>G</kbd> kvalita, <kbd>H</kbd> skrýt popisky, <kbd>P</kbd> fotografie</li>
-            <li><kbd>Tab</kbd> nebo <kbd>?</kbd> tahle nápověda</li>
+            <li><span class="chords"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>chůze, i bez zamčené myši</span></li>
+            <li><span class="chords"><kbd>Shift</kbd></span><span>rychlejší chůze, asi čtyřnásobek</span></li>
+            <li><span class="chords"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span><span>otáčení pohledu</span></li>
+            <li><span class="chords">myš</span><span>rozhlíží, kliknutí kurzor zamkne, Esc ho pustí</span></li>
+            <li><span class="chords">kolečko</span><span>mění odstup kamery, ve fotografii zorný úhel</span></li>
+            <li><span class="chords"><kbd>V</kbd></span><span>první a třetí osoba</span></li>
+            <li><span class="chords"><kbd>M</kbd> <kbd>E</kbd></span><span>mapa a karta místa, mezerník ukáže kde jsem</span></li>
+            <li><span class="chords"><kbd>G</kbd> <kbd>H</kbd> <kbd>P</kbd></span><span>kvalita, skrýt popisky, fotografie</span></li>
+            <li><span class="chords"><kbd>Tab</kbd> <kbd>?</kbd></span><span>tahle nápověda</span></li>
           </ul>
         </div>
         <div id="help-mobile">
@@ -139,6 +140,7 @@
           <button type="button" id="photo-btn">Fotografický režim</button>
           <button type="button" id="tour-btn">Prohlídka centra</button>
           <button type="button" id="home-btn">Zpět na Mírové náměstí</button>
+          <button type="button" id="share-btn">Kopírovat odkaz na výhled</button>
           <button type="button" id="view-btn">První osoba</button>
         </div>
         <p id="menu-visited">Navštíveno 0 / 12</p>
@@ -150,7 +152,7 @@
     <section id="map" hidden>
       <canvas id="map-canvas" aria-label="Mapa centra"></canvas>
       <div id="map-panel">
-        <div class="row">
+        <div class="map-bar">
           <input id="map-search" type="search" placeholder="Ulice nebo místo" aria-label="Hledat ulici nebo místo" />
           <button type="button" id="map-close">Zavřít</button>
         </div>
@@ -187,7 +189,9 @@
       </article>
     </section>
 
+    <div id="thirds" hidden></div>
     <div id="photo-bar" hidden>
+      <button type="button" id="photo-thirds">Třetiny</button>
       <button type="button" id="photo-save">Uložit snímek</button>
       <button type="button" id="photo-exit">Zpět</button>
     </div>

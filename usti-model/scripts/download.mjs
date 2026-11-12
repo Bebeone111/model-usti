@@ -199,26 +199,95 @@ function lineFeature(el, coords, theme) {
   };
 }
 
+function lineMeters(a, b) {
+  return Math.hypot((a[0] - b[0]) * 70000, (a[1] - b[1]) * 111320);
+}
+
+function stitchLines(lines) {
+  const pool = lines.filter((line) => line.length >= 2).map((line) => line.slice());
+  if (!pool.length) return [];
+  pool.sort((a, b) => b.length - a.length);
+  const path = pool.shift();
+  let grew = true;
+  while (grew && pool.length) {
+    grew = false;
+    let bestI = -1;
+    let bestD = 28;
+    let mode = 0;
+    const head = path[0];
+    const tail = path[path.length - 1];
+    for (let i = 0; i < pool.length; i++) {
+      const seg = pool[i];
+      const options = [
+        [lineMeters(tail, seg[0]), 0],
+        [lineMeters(tail, seg[seg.length - 1]), 1],
+        [lineMeters(head, seg[seg.length - 1]), 2],
+        [lineMeters(head, seg[0]), 3],
+      ];
+      for (const [distance, how] of options) {
+        if (distance < bestD) {
+          bestD = distance;
+          bestI = i;
+          mode = how;
+        }
+      }
+    }
+    if (bestI < 0) break;
+    let seg = pool.splice(bestI, 1)[0];
+    if (mode === 1 || mode === 3) seg = seg.slice().reverse();
+    if (mode >= 2) path.unshift(...seg.slice(0, -1));
+    else path.push(...seg.slice(1));
+    grew = true;
+  }
+  return path;
+}
+
+function resampleLine(coords, stepM = 18) {
+  if (coords.length < 2) return coords;
+  const out = [coords[0]];
+  let acc = 0;
+  for (let i = 1; i < coords.length; i++) {
+    acc += lineMeters(coords[i - 1], coords[i]);
+    if (acc >= stepM) {
+      out.push(coords[i]);
+      acc = 0;
+    }
+  }
+  const last = coords[coords.length - 1];
+  if (lineMeters(out[out.length - 1], last) > 1) out.push(last);
+  return out;
+}
+
 function convertRoutes(elements) {
-  const features = [];
+  const byRef = new Map();
   let skipped = 0;
   for (const el of elements) {
     if (el.type !== 'relation' || el.tags?.route !== 'trolleybus') {
       skipped += 1;
       continue;
     }
-    let any = false;
+    const lines = [];
     for (const member of el.members || []) {
       const coords = wayCoords(member);
-      if (coords.length < 2) continue;
-      features.push({
-        type: 'Feature',
-        properties: propsOf(el, 'routes'),
-        geometry: { type: 'LineString', coordinates: coords },
-      });
-      any = true;
+      if (coords.length >= 2) lines.push(coords);
     }
-    if (!any) skipped += 1;
+    if (!lines.length) {
+      skipped += 1;
+      continue;
+    }
+    const ref = String(el.tags.ref || el.tags.name || el.id);
+    const prev = byRef.get(ref);
+    if (!prev || lines.length > prev.lines.length) byRef.set(ref, { el, lines });
+  }
+  const features = [];
+  for (const { el, lines } of byRef.values()) {
+    const path = resampleLine(stitchLines(lines), 18);
+    if (path.length < 2) continue;
+    features.push({
+      type: 'Feature',
+      properties: propsOf(el, 'routes'),
+      geometry: { type: 'LineString', coordinates: path },
+    });
   }
   return { features, skipped };
 }

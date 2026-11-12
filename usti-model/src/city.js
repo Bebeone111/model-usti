@@ -386,12 +386,15 @@ export function makeNameSprite(text) {
   return sprite;
 }
 
+export const nightGlow = { value: 0 };
+
 function facadeOnBeforeCompile(shader) {
+  shader.uniforms.nightGlow = nightGlow;
   shader.vertexShader = shader.vertexShader
     .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying vec2 vFacadeUv;')
     .replace('#include <uv_vertex>', '#include <uv_vertex>\nvFacadeUv = uv;');
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <uv_pars_fragment>', '#include <uv_pars_fragment>\nvarying vec2 vFacadeUv;')
+    .replace('#include <uv_pars_fragment>', '#include <uv_pars_fragment>\nvarying vec2 vFacadeUv;\nuniform float nightGlow;')
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
@@ -401,7 +404,10 @@ function facadeOnBeforeCompile(shader) {
       float course = step(fy, 0.05);
       vec3 glass = vec3(0.22, 0.33, 0.4);
       diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.8);
-      diffuseColor.rgb *= mix(1.0, 0.8, course);`,
+      diffuseColor.rgb *= mix(1.0, 0.8, course);
+      float cornice = step(0.9, fy);
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
+      diffuseColor.rgb += vec3(1.0, 0.78, 0.42) * pane * nightGlow * 0.7;`,
     );
 }
 
@@ -461,7 +467,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v3';
+  material.customProgramCacheKey = () => 'usti-facade-v4';
   return material;
 }
 
@@ -849,6 +855,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const waterParts = [];
   const parkParts = [];
   const blockers = [];
+  const towers = [];
   const buildingLabels = new Map();
   const streetLabels = new Map();
   const riverLabels = new Map();
@@ -914,6 +921,11 @@ export async function buildCity(data, projector, hooks = {}) {
         blocksCamera: true,
         ...bounds,
       });
+      const kind = String(tags.building || '');
+      if ((kind === 'church' || kind === 'cathedral') && area > 40) {
+        const [tx, tz] = ringCentroid(outer);
+        towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area });
+      }
       if (name) {
         const [cx, cz] = ringCentroid(outer);
         const area = Math.abs(signedArea(outer));
@@ -1020,6 +1032,19 @@ export async function buildCity(data, projector, hooks = {}) {
     if (!geometry) return;
     group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })));
   });
+  const keptTowers = [];
+  for (const tower of towers.sort((a, b) => b.area - a.area)) {
+    if (keptTowers.some((kept) => Math.hypot(kept.x - tower.x, kept.z - tower.z) < 16)) continue;
+    keptTowers.push(tower);
+    const width = Math.min(7, Math.max(3.2, Math.sqrt(tower.area) * 0.16));
+    const height = tower.top + 14;
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(width, height, width), new THREE.MeshLambertMaterial({ color: 0xcbb89a }));
+    shaft.position.set(tower.x, tower.y + height / 2, tower.z);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(width * 0.78, 5.5, 4), new THREE.MeshLambertMaterial({ color: 0x6d3830 }));
+    cap.position.set(tower.x, tower.y + height + 2.4, tower.z);
+    cap.rotation.y = Math.PI / 4;
+    group.add(shaft, cap);
+  }
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
@@ -1105,10 +1130,10 @@ export async function buildCity(data, projector, hooks = {}) {
 
   const labelPoints = [];
   const textures = new Map();
-  const place = (text, x, y, z) => {
+  const place = (text, x, y, z, kind = 'place') => {
     if (x < projector.minX + 2 || x > projector.maxX - 2 || z < projector.minZ + 2 || z > projector.maxZ - 2) return;
     stats.labels += 1;
-    labelPoints.push({ text, x, y, z });
+    labelPoints.push({ text, x, y, z, kind });
     if (typeof document === 'undefined') return;
     let map = textures.get(text);
     if (!map) {
@@ -1133,7 +1158,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const cafe = addCafeGarden(group, sample, projector);
   if (cafe) place(cafe.name, cafe.x, cafe.y, cafe.z);
 
-  for (const [text, point] of streetLabels) place(text, point.x, point.y, point.z);
+  for (const [text, point] of streetLabels) place(text, point.x, point.y, point.z, 'street');
   for (const [text, point] of riverLabels) place(text, point.x, point.y, point.z);
   for (const point of areaLabels) place(point.text, point.x, point.y, point.z);
   for (const [text, point] of buildingLabels) place(text, point.x, point.y, point.z);

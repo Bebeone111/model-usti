@@ -232,7 +232,7 @@ a {
   margin-bottom: 8px;
 }
 
-#poi-btn {
+#touch #poi-btn {
   background: #e2b340;
   color: #1c1408;
   border-color: #e2b340;
@@ -382,7 +382,20 @@ body.playing #start {
 }
 
 .keys {
-  padding-left: 18px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.keys li {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, auto) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  margin: 7px 0;
+}
+
+.chords {
+  white-space: nowrap;
 }
 
 kbd {
@@ -461,6 +474,36 @@ select {
   padding: 12px;
   border-radius: 14px;
   background: rgba(14, 28, 38, 0.9);
+}
+
+.map-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.map-bar #map-search {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.map-bar #map-close {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+#thirds {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, transparent 33.33%, rgba(255, 255, 255, 0.45) 33.33%, rgba(255, 255, 255, 0.45) calc(33.33% + 1px), transparent calc(33.33% + 1px), transparent 66.66%, rgba(255, 255, 255, 0.45) 66.66%, rgba(255, 255, 255, 0.45) calc(66.66% + 1px), transparent calc(66.66% + 1px)),
+    linear-gradient(to bottom, transparent 33.33%, rgba(255, 255, 255, 0.45) 33.33%, rgba(255, 255, 255, 0.45) calc(33.33% + 1px), transparent calc(33.33% + 1px), transparent 66.66%, rgba(255, 255, 255, 0.45) 66.66%, rgba(255, 255, 255, 0.45) calc(66.66% + 1px), transparent calc(66.66% + 1px));
 }
 
 #map-results {

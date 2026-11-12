@@ -3,9 +3,9 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { makeProjector } from './geom.js';
 import { makeTerrain, terrainFromBin } from './terrain.js';
-import { buildCity, cameraDistance, makeNameSprite, walkBlocked } from './city.js';
+import { buildCity, cameraDistance, makeNameSprite, nightGlow, walkBlocked } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
-import { updateLabels } from './labels.js';
+import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
 import { addBridgeMarks, addStreetFurniture, addTrolleys, addVetruseMark } from './furniture.js';
@@ -29,9 +29,9 @@ coarseQuery.addEventListener('change', () => {
 });
 
 const PRESETS = {
-  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false },
-  medium: { dpr: 1.45, shadows: false, labels: 260, trees: 0.8, furniture: 1, rain: true },
-  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true },
+  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false, lamps: false },
+  medium: { dpr: 1.45, shadows: false, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true },
+  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true, lamps: true },
 };
 const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
 let quality = coarseQuery.matches || weak ? 'low' : 'medium';
@@ -155,6 +155,10 @@ let gait = 0;
 let groundMat = null;
 let waterMat = null;
 let lampMat = null;
+let poiMarks = [];
+let lampLights = [];
+let waterPoints = [];
+let intro = 0;
 let furniture = null;
 let trolleys = null;
 let places = null;
@@ -187,7 +191,7 @@ const api = {
     return { phase: bob, gait, moving: gait > 0.45 };
   },
 };
-window.__usti = api;
+if (import.meta.env.DEV) window.__usti = api;
 
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -265,6 +269,11 @@ document.addEventListener('mousemove', (event) => {
 canvas.addEventListener('wheel', (event) => {
   if (!playing || overview?.isOpen()) return;
   event.preventDefault();
+  if (photoMode) {
+    camera.fov = Math.min(78, Math.max(32, camera.fov + Math.sign(event.deltaY) * 1.6));
+    camera.updateProjectionMatrix();
+    return;
+  }
   camBack = Math.min(22, Math.max(2.6, camBack + Math.sign(event.deltaY) * 0.7));
 }, { passive: false });
 
@@ -434,15 +443,27 @@ function goHome() {
 
 function climbLookout(poi) {
   let best = null;
-  for (let dx = -40; dx <= 28; dx += 4) {
-    for (let dz = -12; dz <= 36; dz += 4) {
+  for (let dx = -36; dx <= 36; dx += 3) {
+    for (let dz = 16; dz <= 62; dz += 3) {
       const x = poi.x + dx;
       const z = poi.z + dz;
+      if (!collision || walkBlocked(collision, x, z, player.radius)) continue;
+      let clear = true;
+      for (let step = 3; step <= 15; step += 3) {
+        if (walkBlocked(collision, x, z + step, 0.35)) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) continue;
       const h = terrain.sample(x, z);
-      if (!best || h > best.h) best = { x, z, h };
+      const score = h + dz * 0.2 - Math.abs(dx) * 0.05;
+      if (!best || score > best.score) best = { x, z, score };
     }
   }
-  if (best) placeNear(best.x, best.z, Math.PI, -0.28);
+  if (best) placeNear(best.x, best.z, Math.PI, -0.32);
+  else placeNear(poi.x, poi.z + 28, Math.PI, -0.32);
+  camBack = 6.2;
   closePoi();
 }
 
@@ -471,11 +492,11 @@ function limbBox(width, height, depth, material) {
 }
 
 function makePerson() {
-  const skin = new THREE.MeshLambertMaterial({ color: 0xd2a679 });
-  const hair = new THREE.MeshLambertMaterial({ color: 0x3a2c24 });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x3c6eae });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2a3644 });
-  const shoes = new THREE.MeshLambertMaterial({ color: 0x241c18 });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xb98b62 });
+  const hair = new THREE.MeshLambertMaterial({ color: 0x2a211c });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x2a4660 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x1b242c });
+  const shoes = new THREE.MeshLambertMaterial({ color: 0x161311 });
   const group = new THREE.Group();
   group.name = 'person';
   const torso = limbBox(0.36, 0.46, 0.18, shirt);
@@ -664,6 +685,7 @@ function applyQuality(level) {
   if (api.trees?.trunks) api.trees.trunks.count = Math.max(0, Math.floor(api.trees.trunks.userData.fullCount * preset.trees));
   if (api.trees?.canopy) api.trees.canopy.count = Math.max(0, Math.floor(api.trees.canopy.userData.fullCount * preset.trees));
   furniture?.setDensity(preset.furniture);
+  trolleys?.setEnabled(quality !== 'low');
   const select = document.querySelector('#quality');
   if (select) select.value = quality;
   resize();
@@ -691,6 +713,7 @@ function setPhoto(next) {
   photoMode = next;
   document.body.classList.toggle('photo', photoMode);
   document.querySelector('#photo-bar').hidden = !photoMode;
+  if (!photoMode) document.querySelector('#thirds').hidden = true;
   if (photoMode) {
     document.exitPointerLock();
     closeMenu();
@@ -757,6 +780,8 @@ function refreshWalkHud(now) {
   if (!places || now - hudAt < 180) return;
   hudAt = now;
   whereEl.textContent = places.whereText(player.x, player.z);
+  const byWater = waterPoints.some((point) => Math.hypot(point.x - player.x, point.z - player.z) < 42);
+  ambience.presence(byWater);
   const near = places.nearPoi(player.x, player.z);
   actionsEl.textContent = coarse
     ? near
@@ -769,7 +794,7 @@ function refreshWalkHud(now) {
   if (goalMark) {
     goalMark.visible = Boolean(goal);
     if (goal) {
-      const y = terrain.sample(goal.poi.x, goal.poi.z) + 6 + Math.sin(now / 280) * 0.25;
+      const y = terrain.sample(goal.poi.x, goal.poi.z) + 3.1 + Math.sin(now / 280) * 0.15;
       goalMark.position.set(goal.poi.x, y, goal.poi.z);
     }
   }
@@ -804,9 +829,10 @@ function setProgress(ratio, step) {
 function addGround(texture, grid) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1;
-  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
+  texture.anisotropy = Math.max(texture.anisotropy || 1, renderer.capabilities.getMaxAnisotropy() || 8);
   texture.needsUpdate = true;
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
@@ -847,6 +873,26 @@ function addGround(texture, grid) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
   groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide });
+  groundMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nvarying float vCamDist;')
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        float nearMix = 1.0 - smoothstep(14.0, 48.0, vCamDist);
+        vec2 tile = vMapUv * vec2(2400.0, 1800.0);
+        vec2 cell = fract(tile);
+        float grout = step(0.075, cell.x) * step(0.075, cell.y);
+        float grain = fract(sin(dot(floor(tile), vec2(127.1, 311.7))) * 43758.5453);
+        vec3 stone = mix(vec3(0.52, 0.48, 0.42), vec3(0.78, 0.74, 0.66), grout);
+        stone *= 0.88 + 0.18 * grain;
+        diffuseColor.rgb = mix(diffuseColor.rgb, stone, nearMix * 0.58);`,
+      );
+  };
+  groundMat.customProgramCacheKey = () => 'usti-ground-detail';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -897,6 +943,11 @@ function reveal() {
     const stop = places?.currentStop();
     if (stop) placeNear(stop.poi.x, stop.poi.z);
     wantTour = false;
+    intro = 0;
+  } else {
+    intro = 1;
+    camBack = 16.5;
+    player.pitch = -0.7;
   }
 }
 
@@ -942,6 +993,19 @@ document.querySelector('#hud-btn').addEventListener('click', () => setClean(!cle
 document.querySelector('#restore').addEventListener('click', () => setClean(false));
 document.querySelector('#photo-btn').addEventListener('click', () => setPhoto(true));
 document.querySelector('#photo-exit').addEventListener('click', () => setPhoto(false));
+document.querySelector('#photo-thirds').addEventListener('click', () => {
+  const thirds = document.querySelector('#thirds');
+  thirds.hidden = !thirds.hidden;
+});
+document.querySelector('#share-btn').addEventListener('click', async () => {
+  const url = location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    statusEl.textContent = 'Odkaz na výhled je ve schránce.';
+  } catch {
+    statusEl.textContent = url;
+  }
+});
 document.querySelector('#photo-save').addEventListener('click', () => {
   renderer.render(scene, camera);
   const link = document.createElement('a');
@@ -965,6 +1029,70 @@ hourShiftEl.addEventListener('input', () => {
   hourShift = Number(hourShiftEl.value);
 });
 
+function updatePoiMarks() {
+  const camX = -camera.position.x;
+  const camZ = camera.position.z;
+  for (const mark of poiMarks) {
+    const nearPlayer = Math.hypot(player.x - mark.x, player.z - mark.z);
+    const nearCam = Math.hypot(camX - mark.x, camZ - mark.z);
+    mark.pin.visible = nearPlayer > 14 && nearCam > 14 && nearPlayer < 160;
+  }
+}
+
+function updateLampLights(night) {
+  const allow = PRESETS[quality].lamps && night > 0.4;
+  const strength = allow ? Math.min(1, (night - 0.4) / 0.35) : 0;
+  const nearest = (furniture?.lamps || [])
+    .map((lamp) => ({ lamp, dist: (lamp.x - player.x) ** 2 + (lamp.z - player.z) ** 2 }))
+    .sort((a, b) => a.dist - b.dist);
+  const nearStreet = nearest.filter((item) => item.dist < 70 * 70).slice(0, lampLights.length);
+  lampLights.forEach((entry, index) => {
+    const hit = nearStreet[index];
+    let x;
+    let z;
+    let y;
+    if (hit) {
+      x = hit.lamp.x;
+      z = hit.lamp.z;
+      y = hit.lamp.y + 4.2;
+    } else if (allow && index < 4) {
+      const angle = (index / 4) * Math.PI * 2 + 0.4;
+      x = player.x + Math.cos(angle) * 14;
+      z = player.z + Math.sin(angle) * 14;
+      y = player.y + 4.2;
+    } else {
+      entry.light.intensity = 0;
+      entry.glow.visible = false;
+      return;
+    }
+    entry.light.position.set(x, y, z);
+    entry.light.intensity = (hit ? 2.2 : 1.1) * strength;
+    entry.glow.position.set(x, (hit ? hit.lamp.y : player.y) + 0.22, z);
+    entry.glow.visible = strength > 0.05;
+  });
+  if (lampLights[0]) lampLights[0].glowMat.opacity = 0.16 * strength;
+}
+
+function collectWater(water, projector) {
+  const points = [];
+  for (const feature of water?.features || []) {
+    const geometry = feature.geometry;
+    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
+    for (const ring of rings) {
+      if (!ring?.length) continue;
+      let lon = 0;
+      let lat = 0;
+      for (const [lo, la] of ring) {
+        lon += lo;
+        lat += la;
+      }
+      const [x, z] = projector.toLocal(lon / ring.length, lat / ring.length);
+      points.push({ x, z });
+    }
+  }
+  return points;
+}
+
 function timeNow() {
   return new Date(Date.now() + (realClock ? 0 : hourShift) * 3600000);
 }
@@ -973,22 +1101,44 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, clock.getDelta());
   if (playing && !overlayBlocks()) updatePlayer(dt);
+  if (playing && intro > 0) {
+    if (keys.size || Math.abs(stickX) > 0.05 || Math.abs(stickY) > 0.05) intro = 0;
+    else {
+      intro = Math.max(0, intro - dt / 2.6);
+      const blend = 1 - intro * intro;
+      camBack = 16.5 + (8.2 - 16.5) * blend;
+      player.pitch = -0.7 + 0.3 * blend;
+    }
+  }
   updateCamera();
+  let nightNow = 0;
   if (daylight) {
     const skyState = daylight.update(player, { when: timeNow(), weather, allowRain: PRESETS[quality].rain });
+    nightNow = skyState.night;
     if (playing) {
       clockEl.textContent = skyState.clock;
       document.querySelector('#menu-clock').textContent = skyState.clock;
-      if (groundMat) groundMat.color.setScalar(1 - skyState.night * 0.22);
+      if (groundMat) groundMat.color.setScalar((1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1));
       if (waterMat) {
-        waterMat.opacity = skyState.wet ? 0.84 : 0.72;
+        waterMat.opacity = skyState.wet ? 0.86 : 0.72;
         waterMat.color.set(skyState.wet ? 0x123f52 : 0x1a6d88);
+        waterMat.shininess = skyState.night > 0.45 ? 64 : 18;
+        waterMat.specular.set(skyState.night > 0.45 ? 0xd5eef6 : 0xb7dbe6);
       }
-      if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.62 ? 1.2 : 0.05;
+      if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.4 ? 2.6 : 0.22;
+      nightGlow.value = skyState.night > 0.45 ? 0.9 : 0;
     }
   }
+  if (playing) updatePoiMarks();
+  updateLampLights(nightNow);
   if (trolleys && playing) trolleys.update(dt);
-  if (playing) updateLabels(labels, camera, { maxDist: PRESETS[quality].labels, hide: clean || photoMode });
+  if (playing) {
+    updateLabels(labels, camera, {
+      maxDist: PRESETS[quality].labels,
+      hide: clean || photoMode,
+      blockers: hudRects(['#dock', '#touch', '#mini', '#credit']),
+    });
+  }
   if (overview && playing) {
     overview.drawMini();
     if (overview.isOpen()) overview.drawMap();
@@ -1007,8 +1157,8 @@ async function boot() {
     ['trees.geojson', true],
     ['pois.json', true],
     ['furniture.geojson', false],
-    ['routes.geojson', false],
   ];
+  if (quality !== 'low') jobs.push(['routes.geojson', false]);
   const got = new Map();
   let received = 0;
   const onProgress = (file, amount) => {
@@ -1062,12 +1212,23 @@ async function boot() {
   view.add(city.group);
   collision = city.collision;
   labels = city.labels;
+  const poiNames = new Set((loaded.pois?.features || []).map((poi) => poi.name));
+  for (const sprite of labels) {
+    if (poiNames.has(sprite.userData.text)) sprite.userData.poi = true;
+  }
   waterMat = city.waterMaterial;
   api.trees = city.trees;
   player.x = city.start.x;
   player.z = city.start.z;
   player.y = terrain.sample(player.x, player.z);
   player.yaw = city.start.yaw;
+  const aheadX = player.x - Math.sin(player.yaw) * 7;
+  const aheadZ = player.z - Math.cos(player.yaw) * 7;
+  if (!walkBlocked(collision, aheadX, aheadZ, player.radius)) {
+    player.x = aheadX;
+    player.z = aheadZ;
+    player.y = terrain.sample(player.x, player.z);
+  }
   api.start = city.start;
   const pois = (loaded.pois?.features || []).map((poi) => {
     const [x, z] = projector.toLocal(poi.lon, poi.lat);
@@ -1075,30 +1236,38 @@ async function boot() {
   });
   const poiGroup = new THREE.Group();
   poiGroup.name = 'pois';
+  const ringGeo = new THREE.RingGeometry(0.45, 0.68, 18);
+  const pinPole = new THREE.CylinderGeometry(0.03, 0.04, 1.05, 5);
+  const pinFlag = new THREE.BoxGeometry(0.36, 0.18, 0.03);
   for (const poi of pois) {
     const y = terrain.sample(poi.x, poi.z);
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.8, 6), new THREE.MeshLambertMaterial({ color: 0xd7a441 }));
-    pole.position.set(poi.x, y + 1.4, poi.z);
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 10, 8),
-      new THREE.MeshLambertMaterial({ color: 0xf0d78c, emissive: 0x8a6a20, emissiveIntensity: 0.35 }),
-    );
-    ball.position.set(poi.x, y + 2.9, poi.z);
-    pole.userData.noShadow = true;
-    ball.userData.noShadow = true;
-    poiGroup.add(pole, ball);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xf0d78c, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(poi.x, y + 0.16, poi.z);
+    const pin = new THREE.Group();
+    const pole = new THREE.Mesh(pinPole, new THREE.MeshLambertMaterial({ color: 0xc4923a }));
+    pole.position.y = 0.52;
+    const flag = new THREE.Mesh(pinFlag, new THREE.MeshLambertMaterial({ color: 0xf0d78c, emissive: 0x8a6a20, emissiveIntensity: 0.2 }));
+    flag.position.set(0.18, 0.95, 0);
+    pin.add(pole, flag);
+    pin.position.set(poi.x, y, poi.z);
+    pin.userData.noShadow = true;
+    ring.userData.noShadow = true;
+    poiGroup.add(ring, pin);
+    poiMarks.push({ pin, x: poi.x, z: poi.z });
     const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 45);
     if (!named) {
       const sprite = makeNameSprite(poi.name);
-      sprite.position.set(poi.x, y + 4.4, poi.z);
+      sprite.userData.poi = true;
+      sprite.position.set(poi.x, y + 2.4, poi.z);
       poiGroup.add(sprite);
       labels.push(sprite);
     }
   }
   view.add(poiGroup);
   goalMark = new THREE.Mesh(
-    new THREE.ConeGeometry(0.55, 1.3, 8),
-    new THREE.MeshLambertMaterial({ color: 0xf0c14e, emissive: 0x8a6420, emissiveIntensity: 0.45 }),
+    new THREE.ConeGeometry(0.28, 0.7, 7),
+    new THREE.MeshLambertMaterial({ color: 0xf0c14e, emissive: 0x8a6420, emissiveIntensity: 0.35 }),
   );
   goalMark.visible = false;
   goalMark.userData.noShadow = true;
@@ -1107,7 +1276,24 @@ async function boot() {
   lampMat = furniture.lampMat;
   addBridgeMarks(view, loaded.highways, projector, terrain.sample.bind(terrain));
   addVetruseMark(view, projector, terrain.sample.bind(terrain));
-  trolleys = addTrolleys(view, loaded.routes, projector, terrain.sample.bind(terrain));
+  trolleys = quality === 'low' ? null : addTrolleys(view, loaded.routes, projector, terrain.sample.bind(terrain));
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xffb15a,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  lampLights = Array.from({ length: 8 }, () => {
+    const light = new THREE.PointLight(0xffb15a, 0, 36, 1);
+    light.castShadow = false;
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(4.2, 18), glowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.userData.noShadow = true;
+    view.add(light, glow);
+    return { light, glow, glowMat };
+  });
+  waterPoints = collectWater(loaded.water, projector);
   places = createPlaces({ pois, labelPoints: city.labelPoints });
   const bounds = { minX: projector.minX, maxX: projector.maxX, minZ: projector.minZ, maxZ: projector.maxZ };
   overview = createOverview({
@@ -1119,6 +1305,8 @@ async function boot() {
     getPlayer: () => ({ x: player.x, z: player.z, yaw: player.yaw }),
     getWhere: () => places.whereText(player.x, player.z),
     getPois: () => places.pois.map((poi) => ({ ...poi, visited: places.visited.has(poi.id) })),
+    getLabels: () => city.labelPoints,
+    getGoal: () => places.currentStop()?.poi || null,
     search: (query) => places.search(query),
     onTeleport: (x, z) => {
       placeNear(x, z);

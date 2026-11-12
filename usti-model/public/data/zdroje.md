@@ -25,7 +25,7 @@ Počátek modelu je střed bboxu: 14.04095° E, 50.6615° N. Osa X míří na v�
 | `water.geojson` | 8 | `natural=water`, `waterway=river` a `riverbank` (Labe, Bílina, nádrže) |
 | `trees.geojson` | 17 | `natural=tree`, `natural=wood`, `leisure=park` (stromořadí, parky a lesíky). Lesy v `landuse=forest` jsou v `landuse.geojson`. |
 | `furniture.geojson` | 383 | lavičky, lampy, zastávky, koše, přechody |
-| `routes.geojson` | 1992 | úseky trolejbusových linek |
+| `routes.geojson` | 13 | jedna zjednodušená trasa na trolejbusovou linku |
 | `pois.json` | 12 | karty zajímavých míst |
 
 ## Ortofoto
