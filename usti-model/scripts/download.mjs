@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(fs.readFileSync(path.join(root, 'area.config.json'), 'utf8'));
 const bbox = config.bbox;
-const dataDir = path.join(root, 'data');
+const dataDir = path.join(root, 'public', 'data');
 const UA = 'usti-nad-labem-model/0.1 (local educational 3D city model)';
 
 const b = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;

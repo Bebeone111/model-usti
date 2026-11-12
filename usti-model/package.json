@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
+    "build": "node ./scripts/dev.mjs build",
     "download": "node scripts/download.mjs",
     "preview": "node ./scripts/dev.mjs preview"
   },

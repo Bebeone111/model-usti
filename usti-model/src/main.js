@@ -539,21 +539,23 @@ function addGround(texture, grid) {
   view.add(mesh);
 }
 
+const DATA = '/data';
+
 async function boot() {
   const [buildings, highways, landuse, water, meta, terrainJson, texture] = await Promise.all([
-    loadJson('/data/buildings.geojson'),
-    loadJson('/data/highways.geojson'),
-    loadJson('/data/landuse.geojson'),
-    loadJson('/data/water.geojson'),
-    loadJson('/data/meta.json'),
-    loadJson('/data/terrain.json'),
+    loadJson(`${DATA}/buildings.geojson`),
+    loadJson(`${DATA}/highways.geojson`),
+    loadJson(`${DATA}/landuse.geojson`),
+    loadJson(`${DATA}/water.geojson`),
+    loadJson(`${DATA}/meta.json`),
+    loadJson(`${DATA}/terrain.json`),
     new Promise((resolve, reject) => {
-      new THREE.TextureLoader().load('/data/ortho.jpg', resolve, undefined, () => reject(new Error('Ortofoto se nepodařilo načíst.')));
+      new THREE.TextureLoader().load(`${DATA}/ortho.jpg`, resolve, undefined, () => reject(new Error('Ortofoto se nepodařilo načíst.')));
     }),
   ]);
   const sameBox = ['west', 'south', 'east', 'north'].every((key) => Math.abs(area.bbox[key] - meta.bbox[key]) < 1e-8);
   if (!sameBox) {
-    hintEl.textContent = 'BBox v area.config.json nesedí s data/meta.json. Spusťte npm run download.';
+    hintEl.textContent = 'BBox v area.config.json nesedí s public/data/meta.json. Spusťte npm run download.';
   }
   terrain = makeTerrain(terrainJson, projector);
   addGround(texture, terrain);
