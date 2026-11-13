@@ -1108,7 +1108,13 @@ export async function buildCity(data, projector, hooks = {}) {
       const rows = windowRows(tags, top, base);
       const [cx0, cz0] = ringCentroid(outer);
       const vetruseAt = projector.toLocal(14.039608, 50.655013);
-      if (styleName !== 'vetruse' && Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 48) return;
+      const lookoutAt = projector.toLocal(14.03980, 50.65540);
+      if (
+        styleName !== 'vetruse'
+        && (Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 95 || Math.hypot(cx0 - lookoutAt[0], cz0 - lookoutAt[1]) < 70)
+      ) {
+        return;
+      }
       if (styleName && HERO_MESH.has(styleName)) {
         const [hx, hz] = ringCentroid(outer);
         heroes.push({
