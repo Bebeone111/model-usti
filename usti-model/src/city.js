@@ -1267,8 +1267,12 @@ export async function buildCity(data, projector, hooks = {}) {
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
   const banked = wrapBankSample(sample, basins, riverY);
-  drapeFlat(roads.asphalt, banked, 0.28, asphaltParts);
-  drapeFlat(roads.walk, banked, 0.14, walkParts);
+  const roadSample = (x, z) => {
+    const { inside, shore } = shoreDist(x, z, basins, riverY);
+    return inside || shore < 22 ? banked(x, z) : sample(x, z);
+  };
+  drapeFlat(roads.asphalt, roadSample, 0.28, asphaltParts);
+  drapeFlat(roads.walk, roadSample, 0.14, walkParts);
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
