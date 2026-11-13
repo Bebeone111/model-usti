@@ -1268,6 +1268,7 @@ export async function buildCity(data, projector, hooks = {}) {
     });
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
+  const banked = wrapBankSample(sample, basins, riverY);
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1319,10 +1320,10 @@ export async function buildCity(data, projector, hooks = {}) {
         const [x, z] = ringCentroid(outer);
         best = { area, x, z, y: sample(x, z) + 8 };
       }
-      if (!pointInRing(startX, startZ, outer)) {
+        if (!pointInRing(startX, startZ, outer)) {
         const edge = densify(outer.concat([outer[0]]), 14);
         const flat = triangulate(edge.slice(0, -1), [], 0, 1);
-        if (flat) parkParts.push(conformSurface(flat, sample, 0.06));
+        if (flat) parkParts.push(conformSurface(flat, banked, 0.06));
       }
     });
     if (best) areaLabels.push({ text: name, ...best });
@@ -1394,12 +1395,12 @@ export async function buildCity(data, projector, hooks = {}) {
 
   const parks = geometryFromParts(parkParts);
   if (parks) {
-    group.add(
-      new THREE.Mesh(
-        parks,
-        new THREE.MeshLambertMaterial({ color: 0x63a84a, side: THREE.FrontSide }),
-      ),
+    const parkMesh = new THREE.Mesh(
+      parks,
+      new THREE.MeshLambertMaterial({ color: 0x63a84a, side: THREE.FrontSide }),
     );
+    parkMesh.name = 'parks';
+    group.add(parkMesh);
   }
   const walkMesh = geometryFromParts(walkParts);
   if (walkMesh) {
@@ -1641,11 +1642,8 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     if (d < shore) shore = d;
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
-  if (shore < 14) return Math.min(rawY, riverY + 0.14 + shore * 0.05);
-  if (shore < 55) {
-    const cap = riverY + 0.84 + (shore - 14) * 0.07;
-    return Math.min(rawY, cap);
-  }
+  if (shore < 12) return Math.min(rawY, riverY + 0.18 + shore * 0.12);
+  if (shore < 28) return Math.min(rawY, riverY + 1.62 + (shore - 12) * 0.16);
   return rawY;
 }
 
@@ -1673,6 +1671,18 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
   if (!geometry?.attributes?.position || !basins?.length) return;
   const pos = geometry.attributes.position;
   const y0 = riverY ?? Math.min(...basins.map((b) => b.y));
+  const cell = 10;
+  const wet = new Map();
+  const wetKey = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  const markWet = (x, z) => {
+    const k = wetKey(x, z);
+    let list = wet.get(k);
+    if (!list) {
+      list = [];
+      wet.set(k, list);
+    }
+    list.push(x, z);
+  };
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
@@ -1687,6 +1697,32 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
         y = Math.min(y, y0 - 0.45);
       }
     }
+    pos.setY(i, y);
+    if (inside || y <= y0 + 0.85 || shore < 5) markWet(x, z);
+  }
+  const wetDist = (x, z) => {
+    let best = Infinity;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    for (let dz = -3; dz <= 3; dz++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const list = wet.get(`${ix + dx},${iz + dz}`);
+        if (!list) continue;
+        for (let i = 0; i < list.length; i += 2) {
+          const d = Math.hypot(x - list[i], z - list[i + 1]);
+          if (d < best) best = d;
+        }
+      }
+    }
+    return best;
+  };
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const d = wetDist(x, z);
+    let y = pos.getY(i);
+    if (d < 12) y = Math.min(y, y0 + 0.18 + d * 0.12);
+    else if (d < 28) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.16);
     pos.setY(i, y);
   }
   const index = geometry.index;
@@ -1714,14 +1750,15 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const nx = uy * vz - uz * vy;
       const nz = ux * vy - uy * vx;
       const len = Math.hypot(nx, ny, nz) || 1;
-      if (ny / len > 0.62) continue;
+      if (ny / len > 0.92) continue;
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);
-      if (!inside && shore > 70) continue;
+      const nearWater = inside || shore < 36 || wetDist(mx, mz) < 32;
+      if (!nearWater) continue;
       const low = Math.min(ay, by, cy);
-      const cap = y0 + (inside ? -0.4 : 0.35 + Math.min(shore, 24) * 0.07);
-      const next = Math.min(low + 0.25, cap);
+      const cap = y0 + (inside ? -0.4 : 0.35 + Math.min(Math.min(shore, wetDist(mx, mz)), 24) * 0.08);
+      const next = Math.min(low + 0.2, cap);
       pos.setY(i0, Math.min(ay, next));
       pos.setY(i1, Math.min(by, next));
       pos.setY(i2, Math.min(cy, next));

@@ -199,10 +199,10 @@ function vojtech(group, hero) {
 }
 
 function vetruse(group, hero) {
-  const x = hero.x + 1;
-  const z = hero.z + 30;
-  const y = hero.y + 2.2;
-  const yaw = 0.22;
+  const x = hero.x + 2;
+  const z = hero.z + 66;
+  const y = hero.y - 5.2;
+  const yaw = 0.08;
   const plaster = new THREE.MeshLambertMaterial({ color: 0xf3ead8 });
   const roof = new THREE.MeshLambertMaterial({ color: 0x8a3a2c });
   const wood = new THREE.MeshLambertMaterial({ color: 0x6a5138 });
@@ -214,26 +214,25 @@ function vetruse(group, hero) {
     transparent: true,
     opacity: 0.78,
   });
-  addBox(group, plaster, x, y + 5.2, z, 26, 10.4, 16.5, yaw);
-  addGableRoof(group, roof, x, y + 10.4, z, 27.6, 6.6, 17.8, yaw);
-  const risX = x + Math.cos(yaw) * 9.2;
-  const risZ = z + Math.sin(yaw) * 9.2;
-  addBox(group, plaster, risX, y + 7.6, risZ, 7.6, 15.2, 7.6, yaw);
-  addGableRoof(group, roof, risX, y + 15.2, risZ, 8.6, 5.2, 8.6, yaw + Math.PI / 2);
-  const east = yaw - Math.PI / 2;
-  const tx = x + Math.cos(east) * 9.2;
-  const tz = z + Math.sin(east) * 9.2;
-  addBox(group, wood, tx, y + 4.35, tz, 11.5, 0.22, 8.4, yaw);
-  addBox(group, trim, tx + Math.cos(east) * 4.0, y + 4.95, tz + Math.sin(east) * 4.0, 11.5, 1.05, 0.14, yaw);
-  for (const side of [-3.6, 0, 3.6]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.15, 6), wood);
-    post.position.set(tx + Math.cos(yaw) * side + Math.cos(east) * 3.9, y + 5.0, tz + Math.sin(yaw) * side + Math.sin(east) * 3.9);
+  addBox(group, plaster, x, y + 5.6, z, 28, 11.2, 16, yaw);
+  addGableRoof(group, roof, x, y + 11.2, z, 29.6, 6.8, 17.2, yaw);
+  const risX = x + Math.cos(yaw) * 10.2;
+  const risZ = z + Math.sin(yaw) * 10.2;
+  addBox(group, plaster, risX, y + 8.4, risZ, 7.2, 16.8, 7.2, yaw);
+  addGableRoof(group, roof, risX, y + 16.8, risZ, 8.2, 5.4, 8.2, yaw + Math.PI / 2);
+  const tx = x + 9.4;
+  const tz = z + 1.4;
+  addBox(group, wood, tx, y + 4.55, tz, 12.2, 0.22, 8.8, yaw);
+  addBox(group, trim, tx + 4.1, y + 5.15, tz, 12.2, 1.1, 0.14, yaw);
+  for (const side of [-3.8, 0, 3.8]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.2, 6), wood);
+    post.position.set(tx + Math.sin(yaw) * side + 4.0, y + 5.2, tz + Math.cos(yaw) * side);
     post.userData.noShadow = true;
     group.add(post);
   }
-  addBox(group, glass, x + Math.sin(yaw) * 6.7, y + 4.6, z + Math.cos(yaw) * 6.7, 12.4, 2.6, 0.14, yaw);
-  addBox(group, glass, x - Math.sin(yaw) * 6.7, y + 4.6, z - Math.cos(yaw) * 6.7, 10.8, 2.4, 0.14, yaw);
-  return boxBlocker(x, z, 14, 11, y + 12);
+  addBox(group, glass, x + Math.sin(yaw) * 6.4, y + 5.0, z + Math.cos(yaw) * 6.4, 13.2, 2.8, 0.14, yaw);
+  addBox(group, glass, x - Math.sin(yaw) * 6.4, y + 5.0, z - Math.cos(yaw) * 6.4, 11.4, 2.5, 0.14, yaw);
+  return boxBlocker(x, z, 15, 12, y + 14);
 }
 
 function forum(group, hero) {
