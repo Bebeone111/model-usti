@@ -1727,6 +1727,34 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
   }
   const index = geometry.index;
   if (index) {
+    const neigh = Array.from({ length: pos.count }, () => []);
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      neigh[a].push(b, c);
+      neigh[b].push(a, c);
+      neigh[c].push(a, b);
+    }
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        let y = pos.getY(i);
+        if (y <= y0 + 1.8) continue;
+        if (wetDist(x, z) > 48 && shoreDist(x, z, basins, y0).shore > 48) continue;
+        let cap = y;
+        for (const j of neigh[i]) {
+          const yj = pos.getY(j);
+          if (yj > y0 + 6.5) continue;
+          const dist = Math.hypot(x - pos.getX(j), z - pos.getZ(j)) || 1;
+          cap = Math.min(cap, yj + dist * 0.08);
+        }
+        if (cap < y) pos.setY(i, cap);
+      }
+    }
+  }
+  if (index) {
     for (let t = 0; t < index.count; t += 3) {
       const i0 = index.getX(t);
       const i1 = index.getX(t + 1);
