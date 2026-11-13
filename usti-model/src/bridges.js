@@ -340,6 +340,40 @@ function deckMesh(fr, y, half, camber = 0) {
   return geo;
 }
 
+function deckSlab(fr, y, half, camber = 0, thick = 0.62) {
+  const positions = [];
+  const total = Math.max(1, fr.length - 1);
+  const push = (ax, ay, az, bx, by, bz, cx, cy, cz) => {
+    positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+  };
+  for (let i = 0; i < fr.length - 1; i++) {
+    const a = fr[i];
+    const b = fr[i + 1];
+    const ya = y + camber * Math.sin((i / total) * Math.PI);
+    const yb = y + camber * Math.sin(((i + 1) / total) * Math.PI);
+    const a0x = a.x + a.nx * half;
+    const a0z = a.z + a.nz * half;
+    const a1x = a.x - a.nx * half;
+    const a1z = a.z - a.nz * half;
+    const b0x = b.x + b.nx * half;
+    const b0z = b.z + b.nz * half;
+    const b1x = b.x - b.nx * half;
+    const b1z = b.z - b.nz * half;
+    push(a0x, ya, a0z, b0x, yb, b0z, b1x, yb, b1z);
+    push(a0x, ya, a0z, b1x, yb, b1z, a1x, ya, a1z);
+    push(a0x, ya - thick, a0z, b1x, yb - thick, b1z, b0x, yb - thick, b0z);
+    push(a0x, ya - thick, a0z, a1x, ya - thick, a1z, b1x, yb - thick, b1z);
+    push(a0x, ya, a0z, b0x, yb, b0z, b0x, yb - thick, b0z);
+    push(a0x, ya, a0z, b0x, yb - thick, b0z, a0x, ya - thick, a0z);
+    push(a1x, ya, a1z, b1x, yb - thick, b1z, b1x, yb, b1z);
+    push(a1x, ya, a1z, a1x, ya - thick, a1z, b1x, yb - thick, b1z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function northEndT(pts) {
   const a = pathAt(pts, 0.08);
   const b = pathAt(pts, 0.92);
@@ -347,9 +381,9 @@ function northEndT(pts) {
 }
 
 function buildMarian(pts, waterY, sample, detail) {
-  const deckY = waterY + 8.6;
-  const fr = frames(resample(pts, 6));
-  const half = 8.4;
+  const deckY = waterY + 9.15;
+  const fr = frames(resample(pts, 4.2));
+  const half = 8.55;
   const steel = new THREE.MeshLambertMaterial({ color: 0xcfd6dc, emissive: 0x6a7884, emissiveIntensity: 0.08 });
   const pale = new THREE.MeshLambertMaterial({ color: 0xe8eef2, emissive: 0x9eb0be, emissiveIntensity: 0.22 });
   const road = new THREE.MeshLambertMaterial({ color: 0x4a5158 });
@@ -405,8 +439,15 @@ function buildMarian(pts, waterY, sample, detail) {
   const ramps = addRamps(fr, deckY, sample, half);
   const group = new THREE.Group();
   group.name = 'mariansky';
-  const roadMesh = merge([deckMesh(fr, deckY, half)], road);
-  const walkMesh = merge([deckMesh(fr, deckY + 1.18, 1.85)], walk);
+  const roadMesh = merge([deckSlab(fr, deckY, half, 0, 0.85)], road);
+  if (roadMesh) {
+    roadMesh.renderOrder = 2;
+    roadMesh.material.polygonOffset = true;
+    roadMesh.material.polygonOffsetFactor = -8;
+    roadMesh.material.polygonOffsetUnits = -8;
+    roadMesh.material.depthWrite = true;
+  }
+  const walkMesh = merge([deckSlab(fr, deckY + 1.22, 1.9, 0, 0.28)], walk);
   const pylonMesh = merge(pylonGeos.filter(Boolean), pale);
   const cableMesh = merge(cableGeos.filter(Boolean), pale);
   const extra = merge(rampGeos(ramps), steel);
@@ -427,7 +468,7 @@ function buildMarian(pts, waterY, sample, detail) {
   if (railMesh) group.add(railMesh);
   return {
     group,
-    decks: [deckRecord(fr, deckY + 0.04, half)],
+    decks: [deckRecord(fr, deckY + 0.06, half + 0.15)],
     rails: railBlockers(fr, half, deckY),
     lights: pylons.map((p) => ({ x: p.x, y: p.y + 12, z: p.z })),
   };
@@ -528,7 +569,7 @@ function buildRail(pts, waterY, sample, detail) {
   const sleepers = [];
   const tracks = [];
   const trussHalf = 5.4;
-  const walkShift = -trussHalf - 1.15;
+  const walkShift = -trussHalf - 2.45;
   for (const side of [-1, 1]) {
     const chord = fr.map((p) => ({
       x: p.x + p.nx * trussHalf * side,
@@ -587,7 +628,7 @@ function buildRail(pts, waterY, sample, detail) {
     geos.push(boxGeo(p.x, waterY - 1.8, p.z, trussHalf * 2 + 1.6, botY - waterY + 2.4, 3.8, Math.atan2(p.tx, p.tz)));
   }
   const walkFr = fr.map((p) => ({ ...p, x: p.x + p.nx * walkShift, z: p.z + p.nz * walkShift }));
-  const walkGeos = [deckMesh(walkFr, botY + 0.08, 1.25)];
+  const walkGeos = [deckSlab(walkFr, botY + 0.12, 1.2, 0, 0.28)];
   const ramps = addRamps(walkFr, botY + 0.08, sample, 1.25);
   const group = new THREE.Group();
   group.name = 'zeleznice';
@@ -674,4 +715,62 @@ export function onDeck(decks, x, z, radius = 0.45) {
 export function deckHeight(decks, x, z, fallback) {
   const hit = onDeck(decks, x, z);
   return hit ? hit.y : fallback;
+}
+
+export function nearestWalkDeck(decks, x, z, maxDist = 48) {
+  let best = null;
+  for (const deck of decks || []) {
+    if (!deck.walk) continue;
+    const cx = (deck.minX + deck.maxX) / 2;
+    const cz = (deck.minZ + deck.maxZ) / 2;
+    const dist = Math.hypot(x - cx, z - cz);
+    if (dist > maxDist) continue;
+    if (!best || dist < best.dist) best = { deck, dist, cx, cz };
+  }
+  return best;
+}
+
+export function punchWaterUnderDecks(geometry, decks, waterY) {
+  if (!geometry?.attributes?.position || !decks?.length) return;
+  const pos = geometry.attributes.position;
+  const index = geometry.index;
+  const hide = [];
+  const triCount = index ? index.count / 3 : pos.count / 3;
+  for (let t = 0; t < triCount; t++) {
+    const i0 = index ? index.getX(t * 3) : t * 3;
+    const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    const x = (pos.getX(i0) + pos.getX(i1) + pos.getX(i2)) / 3;
+    const y = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
+    const z = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+    if (Math.abs(y - waterY) > 2.4) continue;
+    for (const deck of decks) {
+      if (x < deck.minX - 0.4 || x > deck.maxX + 0.4 || z < deck.minZ - 0.4 || z > deck.maxZ + 0.4) continue;
+      if (pointInRing(x, z, deck.outer)) {
+        hide.push(t);
+        break;
+      }
+    }
+  }
+  if (!hide.length) return;
+  const drop = new Set(hide);
+  if (index) {
+    const next = [];
+    for (let t = 0; t < triCount; t++) {
+      if (drop.has(t)) continue;
+      next.push(index.getX(t * 3), index.getX(t * 3 + 1), index.getX(t * 3 + 2));
+    }
+    geometry.setIndex(next);
+  } else {
+    const next = [];
+    for (let t = 0; t < triCount; t++) {
+      if (drop.has(t)) continue;
+      for (let k = 0; k < 3; k++) {
+        const i = t * 3 + k;
+        next.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      }
+    }
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(next, 3));
+  }
+  geometry.computeVertexNormals();
 }

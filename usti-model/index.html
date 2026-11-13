@@ -32,8 +32,9 @@
     <canvas id="mini" width="256" height="256" aria-hidden="true"></canvas>
     <p id="credit">
       © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">přispěvatelé OpenStreetMap</a> (ODbL)
-      · ortofoto, DMR 5G a RÚIAN © <a href="https://cuzk.gov.cz/" target="_blank" rel="noopener">ČÚZK</a> (CC BY 4.0)
+      · ortofoto a DMR 5G © <a href="https://cuzk.gov.cz/" target="_blank" rel="noopener">ČÚZK</a> (CC BY 4.0)
       · počasí a ovzduší <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0)
+      · fotky karet <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>
     </p>
     <button type="button" id="restore" hidden>Zobrazit ovládání</button>
     <div id="touch">
@@ -135,12 +136,24 @@
         <label>Posun hodin
           <input id="hour-shift" type="range" min="-12" max="12" step="1" value="0" disabled />
         </label>
+        <label>Roční období
+          <select id="season">
+            <option value="auto">Podle data</option>
+            <option value="spring">Jaro</option>
+            <option value="summer">Léto</option>
+            <option value="autumn">Podzim</option>
+            <option value="winter">Zima</option>
+          </select>
+        </label>
         <p id="menu-clock"></p>
         <div class="row">
           <button type="button" id="sound-btn">Zapnout zvuk okolí</button>
           <button type="button" id="hud-btn">Skrýt HUD a popisky</button>
           <button type="button" id="photo-btn">Fotografický režim</button>
           <button type="button" id="tour-btn">Prohlídka centra</button>
+          <button type="button" id="hunt-btn">Hon na místa</button>
+          <button type="button" id="ride-btn">Svézt se</button>
+          <button type="button" id="fireworks-btn">Ohňostroj</button>
           <button type="button" id="home-btn">Zpět na Mírové náměstí</button>
           <button type="button" id="share-btn">Kopírovat odkaz na výhled</button>
           <button type="button" id="view-btn">První osoba</button>

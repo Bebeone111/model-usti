@@ -70,6 +70,38 @@ export async function fetchWeather() {
 }
 
 export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
+  let season = 'auto';
+  let fireworksOn = false;
+  const starsGeo = new THREE.BufferGeometry();
+  const starN = 160;
+  const starPos = new Float32Array(starN * 3);
+  for (let i = 0; i < starN; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const h = 0.15 + Math.random() * 0.7;
+    starPos[i * 3] = Math.cos(a) * 18;
+    starPos[i * 3 + 1] = 8 + h * 14;
+    starPos[i * 3 + 2] = Math.sin(a) * 18;
+  }
+  starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(
+    starsGeo,
+    new THREE.PointsMaterial({ color: 0xe8f0ff, size: 0.045, transparent: true, opacity: 0, depthWrite: false }),
+  );
+  stars.visible = false;
+  camera.add(stars);
+
+  const burstGeo = new THREE.BufferGeometry();
+  const burstN = 48;
+  const burstPos = new Float32Array(burstN * 3);
+  burstGeo.setAttribute('position', new THREE.BufferAttribute(burstPos, 3));
+  const burst = new THREE.Points(
+    burstGeo,
+    new THREE.PointsMaterial({ color: 0xffd18a, size: 0.12, transparent: true, opacity: 0, depthWrite: false }),
+  );
+  burst.visible = false;
+  camera.add(burst);
+  let burstT = 0;
+
   const rainGeo = new THREE.BufferGeometry();
   const count = 380;
   const positions = new Float32Array(count * 3);
@@ -90,6 +122,11 @@ export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
 
   function update(player, { when, weather, allowRain }) {
     const { elev, az, hour, minute } = sunState(when);
+    const parts = pragueParts(when);
+    const month = parts.month;
+    const seasonNow = season === 'auto'
+      ? (month <= 2 || month === 12 ? 'winter' : month <= 5 ? 'spring' : month <= 8 ? 'summer' : 'autumn')
+      : season;
     const sunAmt = THREE.MathUtils.smoothstep(elev, -0.15, 0.28);
     const night = 1 - sunAmt;
     const cloud = Math.min(1, (weather?.cloud_cover || 0) / 100);
@@ -107,6 +144,9 @@ export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
     hemi.color.set(sunAmt > 0.45 ? 0xfff3dc : 0x9eb4d2);
     sky.material.uniforms.night.value = night;
     sky.material.uniforms.cloud.value = Math.max(cloud, wet ? 0.72 : 0);
+    if (sky.material.uniforms.season) {
+      sky.material.uniforms.season.value = seasonNow === 'autumn' ? 0.55 : seasonNow === 'winter' ? 0.25 : seasonNow === 'spring' ? 0.15 : 0;
+    }
     const fogColor = new THREE.Color(wet ? 0xb7c6d0 : 0xc5dff2).lerp(new THREE.Color(0x1a2740), night * 0.82);
     fog.color.copy(fogColor);
     fog.near = 700 - cloud * 280 - (wet ? 160 : 0);
@@ -116,6 +156,23 @@ export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
     const temp = Number.isFinite(weather?.temperature_2m) ? ` · ${Math.round(weather.temperature_2m)} °C` : '';
     const hh = String(hour).padStart(2, '0');
     const mm = String(minute).padStart(2, '0');
+    stars.visible = night > 0.55;
+    stars.material.opacity = Math.max(0, (night - 0.55) * 1.4);
+    const nye = parts.month === 12 && parts.day === 31 && parts.hour >= 22;
+    burst.visible = fireworksOn || nye;
+    if (burst.visible) {
+      burstT += 0.016;
+      const origin = new THREE.Vector3(0, 12, -22);
+      for (let i = 0; i < burstN; i++) {
+        const a = (i / burstN) * Math.PI * 2;
+        const r = (burstT % 1.6) * 9;
+        burstPos[i * 3] = origin.x + Math.cos(a) * r;
+        burstPos[i * 3 + 1] = origin.y + Math.sin(burstT * 4 + i) * 2;
+        burstPos[i * 3 + 2] = origin.z + Math.sin(a) * r;
+      }
+      burstGeo.attributes.position.needsUpdate = true;
+      burst.material.opacity = 0.55 * (1 - ((burstT % 1.6) / 1.6));
+    }
     rain.visible = Boolean(allowRain && wet && sunAmt > 0.2);
     if (rain.visible) {
       const attr = rainGeo.attributes.position;
@@ -126,8 +183,21 @@ export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
       }
       attr.needsUpdate = true;
     }
-    return { night, wet, clock: `${hh}:${mm}${phrase ? ` · ${phrase}` : ''}${temp}` };
+    return { night, wet, clock: `${hh}:${mm}${phrase ? ` · ${phrase}` : ''}${temp}`, season: seasonNow };
   }
 
-  return { update, rain };
+  return {
+    update,
+    rain,
+    setSeason(next) {
+      season = next || 'auto';
+    },
+    setFireworks(on) {
+      fireworksOn = on;
+    },
+    toggleFireworks() {
+      fireworksOn = !fireworksOn;
+      return fireworksOn;
+    },
+  };
 }

@@ -28,7 +28,8 @@
     "furniture": 383,
     "routes": 1992,
     "railways": 247,
-    "addresses": 1442
+    "addresses": 1442,
+    "aerialways": 2
   },
   "skipped": {
     "buildings": 0,
@@ -39,7 +40,8 @@
     "furniture": 0,
     "routes": 0,
     "railways": 0,
-    "addresses": 0
+    "addresses": 0,
+    "aerialways": 2
   },
   "ortho": {
     "file": "ortho.jpg",
@@ -77,6 +79,7 @@
   },
   "themeTimestamps": {
     "railways": "2026-11-12T20:09:21Z",
-    "addresses": "2026-11-12T20:09:21Z"
+    "addresses": "2026-11-12T20:09:21Z",
+    "aerialways": "2026-11-13T07:24:19Z"
   }
 }

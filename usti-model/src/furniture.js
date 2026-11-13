@@ -87,7 +87,7 @@ export function addStreetFurniture(group, collection, projector, sample) {
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
-    instanced(mergeGeometries([stopGeo, stopCap]), new THREE.MeshLambertMaterial({ color: 0x2f5f86 }), stops, (dummy, point) => {
+    instanced(mergeGeometries([stopGeo, stopCap]), new THREE.MeshLambertMaterial({ color: 0xe2b23a, emissive: 0x6a4a10, emissiveIntensity: 0.25 }), stops, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, 1);
@@ -223,9 +223,55 @@ export function addTrolleys(group, routes, projector, sample) {
   group.add(fleet);
   const dummy = new THREE.Object3D();
   let cursor = 0;
+  let riding = false;
+  let rideAt = 0;
   return {
+    path,
     setEnabled(on) {
       fleet.visible = on;
+    },
+    near(x, z) {
+      if (!fleet.visible) return false;
+      let best = Infinity;
+      for (let i = 0; i < count; i++) {
+        const at = (cursor / 6 + (i * path.length) / count) % path.length;
+        const index = Math.floor(at);
+        const prev = path[index];
+        best = Math.min(best, Math.hypot(prev.x - x, prev.z - z));
+      }
+      return best < 7;
+    },
+    startRide(x, z) {
+      if (!fleet.visible) return false;
+      riding = true;
+      let best = 0;
+      let dist = Infinity;
+      path.forEach((p, i) => {
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < dist) {
+          dist = d;
+          best = i;
+        }
+      });
+      rideAt = best;
+      return true;
+    },
+    riding() {
+      return riding;
+    },
+    stopRide() {
+      riding = false;
+    },
+    stepRide(dt) {
+      if (!riding) return null;
+      rideAt = (rideAt + dt * 4.2) % path.length;
+      const index = Math.floor(rideAt);
+      const next = path[(index + 1) % path.length];
+      const prev = path[index];
+      const t = rideAt - index;
+      const x = prev.x + (next.x - prev.x) * t;
+      const z = prev.z + (next.z - prev.z) * t;
+      return { x, z, yaw: Math.atan2(next.x - prev.x, next.z - prev.z) };
     },
     update(dt) {
       if (!fleet.visible) return;

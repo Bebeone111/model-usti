@@ -25,7 +25,11 @@ const LANDMARKS = {
   52107614: 'forum',
   63469970: 'zdar',
   63470030: 'magistrat',
+  188090766: 'nadrazi',
+  55855582: 'vetruse',
+  79413889: 'divadlo',
 };
+const HERO_MESH = new Set(['pavel', 'vojtech', 'cathedral', 'forum', 'nadrazi', 'vetruse', 'divadlo']);
 const FACADE = {
   pavel: { color: 0x8c3a32, roof: 0x4a3030, glass: [0.14, 0.16, 0.18], trim: [0.86, 0.78, 0.66], cell: 2.15, mode: 1, glow: 0.35, tower: 'brick' },
   vojtech: { color: 0xdccbb0, roof: 0x7a4332, glass: [0.16, 0.24, 0.28], trim: [0.94, 0.9, 0.84], cell: 2.55, mode: 1, glow: 0.4, tower: 'stone' },
@@ -457,7 +461,7 @@ function facadeOnBeforeCompile(shader) {
       diffuseColor.rgb *= mix(1.0, 0.8, course);
       float cornice = step(0.9, fy);
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
-      diffuseColor.rgb += vec3(1.0, 0.78, 0.42) * pane * nightGlow * 1.45;`,
+      diffuseColor.rgb += vec3(1.0, 0.82, 0.45) * pane * nightGlow * 2.55;`,
     );
 }
 
@@ -576,7 +580,7 @@ function styledFacade(style, name) {
         tone = mix(tone, uGlass, pane * 0.9);
         tone = mix(tone, uTrim, cornice);
         tone *= mix(1.0, 0.7, base * 0.8);
-        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow * 1.35;`,
+        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow * 2.4;`,
       );
   };
   material.customProgramCacheKey = () => `usti-landmark-${name}`;
@@ -1015,8 +1019,9 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const bz = a[1] + dz * t1;
         const ox = (dz / len) * 8.5;
         const oz = (-dx / len) * 8.5;
-        pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.12, waterY + 0.35);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, () => waterY, 0.02, waterY + 0.08);
+        const cap = waterY + 1.85;
+        pushRibbon(gravel, ax, az, bx, bz, ox, oz, (x, z) => Math.min(sample(x, z), waterY + 1.6 + Math.hypot(x - ax, z - az) * 0.08), 0.08, cap);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.4, (-dx / len) * 2.4, () => waterY, 0.04, waterY + 0.12);
       }
     }
   }
@@ -1069,6 +1074,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const parkParts = [];
   const blockers = [];
   const towers = [];
+  const heroes = [];
   const buildingLabels = new Map();
   const streetLabels = new Map();
   const riverLabels = new Map();
@@ -1098,6 +1104,40 @@ export async function buildCity(data, projector, hooks = {}) {
         if (hole) holes.push(hole);
       }
       const rows = windowRows(tags, top, base);
+      if (styleName && HERO_MESH.has(styleName)) {
+        const [hx, hz] = ringCentroid(outer);
+        heroes.push({
+          key: styleName,
+          tags,
+          outer,
+          holes,
+          x: hx,
+          z: hz,
+          y: sample(hx, hz),
+          top,
+          area: Math.abs(signedArea(outer)),
+        });
+        const closedOuter = outer.concat([outer[0]]);
+        const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
+        const bounds = polygonBounds([closedOuter, ...closedHoles]);
+        blockers.push({
+          outer: closedOuter,
+          holes: closedHoles,
+          top,
+          blocksWalk: true,
+          blocksCamera: true,
+          ...bounds,
+        });
+        if (name) {
+          const prev = buildingLabels.get(name);
+          const area = Math.abs(signedArea(outer));
+          if (!prev || area > prev.area) {
+            buildingLabels.set(name, { area, x: hx, z: hz, y: sample(hx, hz) + top + 2.4 });
+          }
+        }
+        placed = true;
+        return;
+      }
       const strips = [];
       const outerWall = wallStrip(outer, sample, base, top, Math.max(1, rows));
       if (outerWall) strips.push(outerWall);
@@ -1147,7 +1187,7 @@ export async function buildCity(data, projector, hooks = {}) {
         blocksCamera: true,
         ...bounds,
       });
-      if (styleName && FACADE[styleName].tower && area > 18) {
+      if (styleName && FACADE[styleName]?.tower && area > 18) {
         const [tx, tz] = towerPoint(outer);
         towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area, tower: FACADE[styleName].tower });
       }
@@ -1393,6 +1433,7 @@ export async function buildCity(data, projector, hooks = {}) {
     waterMaterial.customProgramCacheKey = () => 'usti-water-flat-v1';
     const waterObject = new THREE.Mesh(waterMesh, waterMaterial);
     waterObject.name = 'water';
+    waterObject.renderOrder = 0;
     waterObject.userData.noShadow = true;
     group.add(waterObject);
   }
@@ -1435,7 +1476,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins };
+  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins, heroes };
 }
 
 function makeCollision(blockers, projector) {
@@ -1554,20 +1595,52 @@ export function walkHeight(collision, x, z, ground) {
   return deck ? Math.max(ground, deck.y) : ground;
 }
 
-export function sinkGround(geometry, basins) {
+function distToRing(x, z, ring) {
+  let best = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const d = distPointSeg(x, z, ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+export function bankHeight(rawY, x, z, basins, riverY) {
+  if (!basins?.length) return rawY;
+  let inside = false;
+  let shore = Infinity;
+  for (const basin of basins) {
+    if (!basin.river && Math.abs(basin.y - riverY) > 0.2) continue;
+    const hit = pointInRing(x, z, basin.outer);
+    let hole = false;
+    for (const ring of basin.holes || []) {
+      if (pointInRing(x, z, ring)) hole = true;
+    }
+    if (hit && !hole) inside = true;
+    const d = distToRing(x, z, basin.outer.concat([basin.outer[0]]));
+    if (d < shore) shore = d;
+  }
+  if (inside) return Math.min(rawY, riverY - 0.85);
+  if (shore < 12) {
+    const t = shore < 4 ? 1 : 1 - (shore - 4) / 8;
+    const target = riverY + 0.12 + shore * 0.09;
+    const blended = rawY * (1 - t * 0.92) + target * (t * 0.92);
+    return Math.min(blended, riverY + 1.9 + shore * 0.12);
+  }
+  return rawY;
+}
+
+export function wrapBankSample(sample, basins, riverY) {
+  return (x, z) => bankHeight(sample(x, z), x, z, basins, riverY);
+}
+
+export function sinkGround(geometry, basins, riverY) {
   if (!geometry?.attributes?.position || !basins?.length) return;
   const pos = geometry.attributes.position;
+  const y0 = riverY ?? Math.min(...basins.map((b) => b.y));
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    for (const basin of basins) {
-      if (!pointInRing(x, z, basin.outer)) continue;
-      let hole = false;
-      for (const ring of basin.holes) {
-        if (pointInRing(x, z, ring)) hole = true;
-      }
-      if (!hole) pos.setY(i, Math.min(pos.getY(i), basin.y - 1.2));
-    }
+    pos.setY(i, bankHeight(pos.getY(i), x, z, basins, y0));
   }
   pos.needsUpdate = true;
   geometry.computeVertexNormals();

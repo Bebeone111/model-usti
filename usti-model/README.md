@@ -41,6 +41,17 @@ Viz `public/data/zdroje.md` (adresy, licence, datum, přesný bbox).
 
 Jednoduché výšky (tag `height`, jinak RÚIAN podlaží × 3,1 m když jsou v datech, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m) a stejný počet řad oken. Dveře jsou na straně do ulice. Střechy jsou ploché nebo valbové, fasáda není fotografie adresy. Kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.
 
+## Poznámky k v5 (co se přeskočilo)
+
+- **RÚIAN VFR/GML celé obce** se nestahuje. WFS budov v bboxu se při stažení zkouší; když selže, credit RÚIAN v patičce není. Adresy do hledání jdou z OSM.
+- **Jemnější DMR 2–3 m/px** se nepřegenerovával; základ je ~8 m, břehy v `terrain-detail.bin` ~4 m. Hladina řek zůstává rovina, terén u břehu se k ní svažuje v kódu.
+- **Živé WMTS dlaždice** kolem kamery nejsou. Zůstávají `ortho.jpg` / `ortho-mobile.jpg`.
+- **Worker** na stavbu města není (Three.js meshe vznikají v hlavním vlákně po slice).
+- **GTFS a živé GPS** DPmÚL nejsou. Trolejbusy jedou po OSM relacích; na nízké kvalitě se trasy nenačítají. Nastoupit jde z menu „Svézt se“.
+- **Muzeum města** v bboxu nemá pojmenovaný OSM půdorys, proto v modelu není. Divadlo (way 79413889) ano.
+- **Multiplayer** (blok F) a Mapillary / splat / GIS města (blok G) nejsou.
+- **Pohled z vody** po pevné cestě není. Lanovka na Větruši je z fallback osy, pokud Overpass aerialway v bboxu nic nevrátí.
+
 ## Poznámky k v4 (co se přeskočilo)
 
 - **RÚIAN VFR/GML celé obce** se nestahuje — soubor obce Ústí je moc velký. Adresy do hledání jdou z OSM (`addr:street` + číslo popisné) po `npm run download`. Výšky pořád berou OSM `height`, pak RÚIAN podlaží pokud tag existuje, pak `building:levels`.

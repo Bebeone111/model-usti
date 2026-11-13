@@ -4,6 +4,9 @@
 /assets/*
   Cache-Control: public, max-age=604800
 
+/data/poi-photos/*
+  Cache-Control: public, max-age=604800
+
 /
   Cache-Control: public, max-age=300
 
