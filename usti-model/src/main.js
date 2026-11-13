@@ -714,6 +714,10 @@ function updateCamera() {
   camY = Math.max(player.y + 1.7, floor + 2.05, camY);
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
+  if (shotMode) {
+    camera.lookAt(-(player.x + fx * 22), player.y + 6.5 + sin * 14, player.z + fz * 22);
+    return;
+  }
   const lookY = Math.max(player.y + 1.15, terrain.sample(player.x + fx * 9, player.z + fz * 9) + 1.2);
   camera.lookAt(-(player.x + fx * 9), lookY + sin * 2.2, player.z + fz * 9);
 }

@@ -1668,8 +1668,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const on = pointInRing(x, z, deck.outer);
       const edge = distToRing(x, z, deck.outer);
       if (on || edge < 24) {
-        const cap = inside || shore < 28 ? y0 - 0.55 : deck.y - 0.4;
-        y = Math.min(y, cap);
+        y = Math.min(y, y0 - 0.45);
       }
     }
     pos.setY(i, y);
