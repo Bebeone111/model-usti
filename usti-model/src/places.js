@@ -1,4 +1,6 @@
-const TOUR_IDS = ['nadrazi', 'forum', 'namesti', 'benes', 'mariansky', 'vetruse', 'pavel', 'namesti'];
+import { HUNT_STOPS } from './hunt.js';
+
+const TOUR_IDS = ['nadrazi', 'forum', 'namesti', 'sikma', 'benes', 'mariansky', 'vetruse', 'pavel', 'namesti'];
 const VISIT_KEY = 'usti-visited';
 
 function norm(value) {
@@ -21,6 +23,7 @@ export function createPlaces({ pois, labelPoints, addresses = [] }) {
   const byId = new Map(pois.map((poi) => [poi.id, poi]));
   const visited = loadVisited();
   let tour = null;
+  let hunt = null;
   let arrived = -1;
 
   function save() {
@@ -91,6 +94,7 @@ export function createPlaces({ pois, labelPoints, addresses = [] }) {
   }
 
   function startTour() {
+    hunt = null;
     tour = { index: 0 };
     arrived = -1;
     return currentStop();
@@ -131,6 +135,54 @@ export function createPlaces({ pois, labelPoints, addresses = [] }) {
     arrived = -1;
   }
 
+  function huntPoi(stop) {
+    if (!stop) return null;
+    const id = stop.poi || stop.id;
+    return byId.get(id === 'namesti-end' ? 'namesti' : id) || null;
+  }
+
+  function startHunt() {
+    tour = null;
+    hunt = { index: 0 };
+    arrived = -1;
+    return currentHunt();
+  }
+
+  function currentHunt() {
+    if (!hunt) return null;
+    const stop = HUNT_STOPS[hunt.index];
+    const poi = huntPoi(stop);
+    return poi ? { poi, say: stop.say, index: hunt.index, last: hunt.index === HUNT_STOPS.length - 1, total: HUNT_STOPS.length } : null;
+  }
+
+  function noteHunt(x, z) {
+    const stop = currentHunt();
+    if (!stop) return null;
+    const dist = Math.hypot(stop.poi.x - x, stop.poi.z - z);
+    if (dist > 20) return null;
+    if (arrived === hunt.index) return null;
+    arrived = hunt.index;
+    mark(stop.poi.id);
+    return stop;
+  }
+
+  function advanceHunt() {
+    if (!hunt) return null;
+    if (hunt.index >= HUNT_STOPS.length - 1) {
+      hunt = null;
+      arrived = -1;
+      return null;
+    }
+    hunt.index += 1;
+    arrived = -1;
+    return currentHunt();
+  }
+
+  function cancelHunt() {
+    hunt = null;
+    arrived = -1;
+  }
+
   return {
     pois,
     visited,
@@ -143,6 +195,11 @@ export function createPlaces({ pois, labelPoints, addresses = [] }) {
     noteArrival,
     advance,
     cancelTour,
+    startHunt,
+    currentHunt,
+    noteHunt,
+    advanceHunt,
+    cancelHunt,
     total: pois.length,
     visitedCount() {
       return visited.size;

@@ -25,7 +25,11 @@ const LANDMARKS = {
   52107614: 'forum',
   63469970: 'zdar',
   63470030: 'magistrat',
+  188090766: 'nadrazi',
+  55855582: 'vetruse',
+  79413889: 'divadlo',
 };
+const HERO_MESH = new Set(['pavel', 'vojtech', 'cathedral', 'forum', 'nadrazi', 'vetruse', 'divadlo']);
 const FACADE = {
   pavel: { color: 0x8c3a32, roof: 0x4a3030, glass: [0.14, 0.16, 0.18], trim: [0.86, 0.78, 0.66], cell: 2.15, mode: 1, glow: 0.35, tower: 'brick' },
   vojtech: { color: 0xdccbb0, roof: 0x7a4332, glass: [0.16, 0.24, 0.28], trim: [0.94, 0.9, 0.84], cell: 2.55, mode: 1, glow: 0.4, tower: 'stone' },
@@ -452,12 +456,14 @@ function facadeOnBeforeCompile(shader) {
       float fy = fract(vFacadeUv.y);
       float pane = step(0.48, fx) * step(fx, 2.4) * step(0.28, fy) * step(fy, 0.74);
       float course = step(fy, 0.05);
-      vec3 glass = vec3(0.22, 0.33, 0.4);
-      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.8);
+      vec3 glass = vec3(0.18, 0.22, 0.26);
+      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.72);
       diffuseColor.rgb *= mix(1.0, 0.8, course);
       float cornice = step(0.9, fy);
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
-      diffuseColor.rgb += vec3(1.0, 0.78, 0.42) * pane * nightGlow * 1.45;`,
+      float id = floor(vFacadeUv.x / 3.05) * 17.0 + floor(vFacadeUv.y * 9.0);
+      float lit = step(0.5, fract(sin(id * 127.13) * 43758.5453));
+      diffuseColor.rgb += vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * 3.4;`,
     );
 }
 
@@ -517,7 +523,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v4';
+  material.customProgramCacheKey = () => 'usti-facade-v6-amber';
   return material;
 }
 
@@ -576,10 +582,12 @@ function styledFacade(style, name) {
         tone = mix(tone, uGlass, pane * 0.9);
         tone = mix(tone, uTrim, cornice);
         tone *= mix(1.0, 0.7, base * 0.8);
-        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow * 1.35;`,
+        float id = floor(vFacadeUv.x / max(uCell, 0.2)) * 19.0 + floor(vFacadeUv.y * 8.0);
+        float lit = step(0.52, fract(sin(id * 91.17) * 43758.5453));
+        diffuseColor.rgb = tone + vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * uGlow * 2.8;`,
       );
   };
-  material.customProgramCacheKey = () => `usti-landmark-${name}`;
+  material.customProgramCacheKey = () => `usti-landmark-${name}-amber`;
   return material;
 }
 
@@ -996,6 +1004,7 @@ function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift, cap = Infin
 function addShores(group, rings, sample, box, waterY = 0.9) {
   const gravel = [];
   const wet = [];
+  const quay = [];
   for (const ring of rings) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i];
@@ -1013,20 +1022,21 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const az = a[1] + dz * t0;
         const bx = a[0] + dx * t1;
         const bz = a[1] + dz * t1;
-        const ox = (dz / len) * 8.5;
-        const oz = (-dx / len) * 8.5;
-        pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.12, waterY + 0.35);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, () => waterY, 0.02, waterY + 0.08);
+        const landX = (-dz / len) * 2.4;
+        const landZ = (dx / len) * 2.4;
+        pushRibbon(gravel, ax, az, bx, bz, landX, landZ, () => waterY + 1.35, 0, waterY + 1.45);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.2, (-dx / len) * 1.2, () => waterY, 0.04, waterY + 0.1);
+        const yb = waterY - 0.15;
+        const yt = waterY + 1.55;
+        quay.push(ax, yb, az, bx, yb, bz, bx, yt, bz, ax, yb, az, bx, yt, bz, ax, yt, az);
       }
     }
   }
   const make = (positions, color, factor) => {
     if (positions.length < 9) return;
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geometry.computeVertexNormals();
     group.add(
       new THREE.Mesh(
         geometry,
@@ -1042,6 +1052,7 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
   };
   make(gravel, 0xc6b59a, -2);
   make(wet, 0x5e6d66, -3);
+  make(quay, 0x8a8580, -1);
 }
 
 export async function buildCity(data, projector, hooks = {}) {
@@ -1069,6 +1080,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const parkParts = [];
   const blockers = [];
   const towers = [];
+  const heroes = [];
   const buildingLabels = new Map();
   const streetLabels = new Map();
   const riverLabels = new Map();
@@ -1098,6 +1110,56 @@ export async function buildCity(data, projector, hooks = {}) {
         if (hole) holes.push(hole);
       }
       const rows = windowRows(tags, top, base);
+      const [cx0, cz0] = ringCentroid(outer);
+      const vetruseAt = projector.toLocal(14.039608, 50.655013);
+      const lookoutAt = projector.toLocal(14.03980, 50.65540);
+      const squareAt = projector.toLocal(14.040439, 50.660244);
+      const churchAt = projector.toLocal(14.040451, 50.659072);
+      if (
+        styleName !== 'vetruse'
+        && (Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 120 || Math.hypot(cx0 - lookoutAt[0], cz0 - lookoutAt[1]) < 130)
+      ) {
+        return;
+      }
+      if (styleName !== 'cathedral') {
+        const span = squareAt[1] - churchAt[1];
+        const along = span ? (cz0 - churchAt[1]) / span : -1;
+        if (along > 0.12 && along < 0.88 && Math.abs(cx0 - churchAt[0]) < 36) return;
+      }
+      if (styleName && HERO_MESH.has(styleName)) {
+        const [hx, hz] = ringCentroid(outer);
+        heroes.push({
+          key: styleName,
+          tags,
+          outer,
+          holes,
+          x: hx,
+          z: hz,
+          y: sample(hx, hz),
+          top,
+          area: Math.abs(signedArea(outer)),
+        });
+        const closedOuter = outer.concat([outer[0]]);
+        const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
+        const bounds = polygonBounds([closedOuter, ...closedHoles]);
+        blockers.push({
+          outer: closedOuter,
+          holes: closedHoles,
+          top,
+          blocksWalk: true,
+          blocksCamera: true,
+          ...bounds,
+        });
+        if (name) {
+          const prev = buildingLabels.get(name);
+          const area = Math.abs(signedArea(outer));
+          if (!prev || area > prev.area) {
+            buildingLabels.set(name, { area, x: hx, z: hz, y: sample(hx, hz) + top + 2.4 });
+          }
+        }
+        placed = true;
+        return;
+      }
       const strips = [];
       const outerWall = wallStrip(outer, sample, base, top, Math.max(1, rows));
       if (outerWall) strips.push(outerWall);
@@ -1147,7 +1209,7 @@ export async function buildCity(data, projector, hooks = {}) {
         blocksCamera: true,
         ...bounds,
       });
-      if (styleName && FACADE[styleName].tower && area > 18) {
+      if (styleName && FACADE[styleName]?.tower && area > 18) {
         const [tx, tz] = towerPoint(outer);
         towers.push({ x: tx, z: tz, y: sample(tx, tz), top, area, tower: FACADE[styleName].tower });
       }
@@ -1168,8 +1230,6 @@ export async function buildCity(data, projector, hooks = {}) {
     }
   }
 
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
-  drapeFlat(roads.walk, sample, 0.14, walkParts);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1206,6 +1266,13 @@ export async function buildCity(data, projector, hooks = {}) {
     });
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
+  const banked = wrapBankSample(sample, basins, riverY);
+  const roadSample = (x, z) => {
+    const { inside, shore } = shoreDist(x, z, basins, riverY);
+    return inside || shore < 22 ? banked(x, z) : sample(x, z);
+  };
+  drapeFlat(roads.asphalt, roadSample, 0.28, asphaltParts);
+  drapeFlat(roads.walk, roadSample, 0.14, walkParts);
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1257,10 +1324,10 @@ export async function buildCity(data, projector, hooks = {}) {
         const [x, z] = ringCentroid(outer);
         best = { area, x, z, y: sample(x, z) + 8 };
       }
-      if (!pointInRing(startX, startZ, outer)) {
+        if (!pointInRing(startX, startZ, outer)) {
         const edge = densify(outer.concat([outer[0]]), 14);
         const flat = triangulate(edge.slice(0, -1), [], 0, 1);
-        if (flat) parkParts.push(conformSurface(flat, sample, 0.06));
+        if (flat) parkParts.push(conformSurface(flat, banked, 0.06));
       }
     });
     if (best) areaLabels.push({ text: name, ...best });
@@ -1332,12 +1399,12 @@ export async function buildCity(data, projector, hooks = {}) {
 
   const parks = geometryFromParts(parkParts);
   if (parks) {
-    group.add(
-      new THREE.Mesh(
-        parks,
-        new THREE.MeshLambertMaterial({ color: 0x63a84a, side: THREE.FrontSide }),
-      ),
+    const parkMesh = new THREE.Mesh(
+      parks,
+      new THREE.MeshLambertMaterial({ color: 0x63a84a, side: THREE.FrontSide }),
     );
+    parkMesh.name = 'parks';
+    group.add(parkMesh);
   }
   const walkMesh = geometryFromParts(walkParts);
   if (walkMesh) {
@@ -1356,7 +1423,9 @@ export async function buildCity(data, projector, hooks = {}) {
   }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    group.add(new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap)));
+    const asphaltMesh = new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap));
+    asphaltMesh.name = 'asphalt';
+    group.add(asphaltMesh);
   }
   const waterMesh = geometryFromParts(waterParts);
   let waterMaterial = null;
@@ -1393,6 +1462,7 @@ export async function buildCity(data, projector, hooks = {}) {
     waterMaterial.customProgramCacheKey = () => 'usti-water-flat-v1';
     const waterObject = new THREE.Mesh(waterMesh, waterMaterial);
     waterObject.name = 'water';
+    waterObject.renderOrder = 0;
     waterObject.userData.noShadow = true;
     group.add(waterObject);
   }
@@ -1435,7 +1505,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins };
+  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins, heroes };
 }
 
 function makeCollision(blockers, projector) {
@@ -1554,23 +1624,233 @@ export function walkHeight(collision, x, z, ground) {
   return deck ? Math.max(ground, deck.y) : ground;
 }
 
-export function sinkGround(geometry, basins) {
+function distToRing(x, z, ring) {
+  let best = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const d = distPointSeg(x, z, ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+export function bankHeight(rawY, x, z, basins, riverY) {
+  if (!basins?.length) return rawY;
+  let inside = false;
+  let shore = Infinity;
+  for (const basin of basins) {
+    const hit = pointInRing(x, z, basin.outer);
+    let hole = false;
+    for (const ring of basin.holes || []) {
+      if (pointInRing(x, z, ring)) hole = true;
+    }
+    if (hit && !hole) inside = true;
+    const d = distToRing(x, z, basin.outer.concat([basin.outer[0]]));
+    if (d < shore) shore = d;
+  }
+  if (inside) return Math.min(rawY, riverY - 0.9);
+  if (shore < 12) return Math.min(rawY, riverY + 0.18 + shore * 0.12);
+  if (shore < 28) return Math.min(rawY, riverY + 1.62 + (shore - 12) * 0.16);
+  return rawY;
+}
+
+export function wrapBankSample(sample, basins, riverY) {
+  return (x, z) => bankHeight(sample(x, z), x, z, basins, riverY);
+}
+
+function shoreDist(x, z, basins, riverY) {
+  let inside = false;
+  let shore = Infinity;
+  for (const basin of basins || []) {
+    const hit = pointInRing(x, z, basin.outer);
+    let hole = false;
+    for (const ring of basin.holes || []) {
+      if (pointInRing(x, z, ring)) hole = true;
+    }
+    if (hit && !hole) inside = true;
+    const d = distToRing(x, z, basin.outer.concat([basin.outer[0]]));
+    if (d < shore) shore = d;
+  }
+  return { inside, shore };
+}
+
+export function sinkGround(geometry, basins, riverY, decks = []) {
   if (!geometry?.attributes?.position || !basins?.length) return;
   const pos = geometry.attributes.position;
+  const y0 = riverY ?? Math.min(...basins.map((b) => b.y));
+  const cell = 10;
+  const wet = new Map();
+  const wetKey = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  const markWet = (x, z) => {
+    const k = wetKey(x, z);
+    let list = wet.get(k);
+    if (!list) {
+      list = [];
+      wet.set(k, list);
+    }
+    list.push(x, z);
+  };
+  for (const basin of basins) {
+    const ring = basin.outer;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const n = Math.max(1, Math.ceil(len / 5));
+      for (let s = 0; s <= n; s++) markWet(a[0] + ((b[0] - a[0]) * s) / n, a[1] + ((b[1] - a[1]) * s) / n);
+    }
+  }
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    for (const basin of basins) {
-      if (!pointInRing(x, z, basin.outer)) continue;
-      let hole = false;
-      for (const ring of basin.holes) {
-        if (pointInRing(x, z, ring)) hole = true;
+    let y = bankHeight(pos.getY(i), x, z, basins, y0);
+    const { inside, shore } = shoreDist(x, z, basins, y0);
+    for (const deck of decks) {
+      if (!deck.walk) continue;
+      if (x < deck.minX - 28 || x > deck.maxX + 28 || z < deck.minZ - 28 || z > deck.maxZ + 28) continue;
+      const on = pointInRing(x, z, deck.outer);
+      const edge = distToRing(x, z, deck.outer);
+      if (on || edge < 24) {
+        y = Math.min(y, y0 - 0.45);
       }
-      if (!hole) pos.setY(i, Math.min(pos.getY(i), basin.y - 1.2));
+    }
+    pos.setY(i, y);
+    if (inside || y <= y0 + 0.85 || shore < 5) markWet(x, z);
+  }
+  const wetDist = (x, z) => {
+    let best = Infinity;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    for (let dz = -3; dz <= 3; dz++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const list = wet.get(`${ix + dx},${iz + dz}`);
+        if (!list) continue;
+        for (let i = 0; i < list.length; i += 2) {
+          const d = Math.hypot(x - list[i], z - list[i + 1]);
+          if (d < best) best = d;
+        }
+      }
+    }
+    return best;
+  };
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const d = wetDist(x, z);
+    let y = pos.getY(i);
+    if (d < 12) y = Math.min(y, y0 + 0.18 + d * 0.12);
+    else if (d < 50) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.05);
+    pos.setY(i, y);
+  }
+  const index = geometry.index;
+  if (index) {
+    const neigh = Array.from({ length: pos.count }, () => []);
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      neigh[a].push(b, c);
+      neigh[b].push(a, c);
+      neigh[c].push(a, b);
+    }
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        let y = pos.getY(i);
+        if (y <= y0 + 1.8) continue;
+        if (wetDist(x, z) > 48 && shoreDist(x, z, basins, y0).shore > 48) continue;
+        let cap = y;
+        for (const j of neigh[i]) {
+          const yj = pos.getY(j);
+          if (yj > y0 + 6.5) continue;
+          const dist = Math.hypot(x - pos.getX(j), z - pos.getZ(j)) || 1;
+          cap = Math.min(cap, yj + dist * 0.08);
+        }
+        if (cap < y) pos.setY(i, cap);
+      }
+    }
+  }
+  if (index) {
+    for (let t = 0; t < index.count; t += 3) {
+      const i0 = index.getX(t);
+      const i1 = index.getX(t + 1);
+      const i2 = index.getX(t + 2);
+      const ax = pos.getX(i0);
+      const ay = pos.getY(i0);
+      const az = pos.getZ(i0);
+      const bx = pos.getX(i1);
+      const by = pos.getY(i1);
+      const bz = pos.getZ(i1);
+      const cx = pos.getX(i2);
+      const cy = pos.getY(i2);
+      const cz = pos.getZ(i2);
+      const ux = bx - ax;
+      const uy = by - ay;
+      const uz = bz - az;
+      const vx = cx - ax;
+      const vy = cy - ay;
+      const vz = cz - az;
+      const ny = uz * vx - ux * vz;
+      const nx = uy * vz - uz * vy;
+      const nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      if (ny / len > 0.93) continue;
+      const low = Math.min(ay, by, cy);
+      if (low > y0 + 14) continue;
+      const mx = (ax + bx + cx) / 3;
+      const mz = (az + bz + cz) / 3;
+      const { inside, shore } = shoreDist(mx, mz, basins, y0);
+      const dWet = wetDist(mx, mz);
+      const nearWater = inside || shore < 48 || dWet < 44 || low < y0 + 3.2;
+      if (!nearWater) continue;
+      const cap = y0 + (inside ? -0.4 : 0.28 + Math.min(Math.min(shore, dWet), 22) * 0.09);
+      const next = Math.min(low + 0.18, cap);
+      pos.setY(i0, Math.min(ay, next));
+      pos.setY(i1, Math.min(by, next));
+      pos.setY(i2, Math.min(cy, next));
     }
   }
   pos.needsUpdate = true;
   geometry.computeVertexNormals();
+  const steep = new Float32Array(pos.count);
+  steep.fill(1);
+  const shore = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const hit = shoreDist(pos.getX(i), pos.getZ(i), basins, y0);
+    shore[i] = hit.inside ? 0 : Math.min(hit.shore, 80);
+  }
+  if (index) {
+    for (let t = 0; t < index.count; t += 3) {
+      const i0 = index.getX(t);
+      const i1 = index.getX(t + 1);
+      const i2 = index.getX(t + 2);
+      const ax = pos.getX(i0);
+      const ay = pos.getY(i0);
+      const az = pos.getZ(i0);
+      const bx = pos.getX(i1);
+      const by = pos.getY(i1);
+      const bz = pos.getZ(i1);
+      const cx = pos.getX(i2);
+      const cy = pos.getY(i2);
+      const cz = pos.getZ(i2);
+      const ux = bx - ax;
+      const uy = by - ay;
+      const uz = bz - az;
+      const vx = cx - ax;
+      const vy = cy - ay;
+      const vz = cz - az;
+      const ny = uz * vx - ux * vz;
+      const nx = uy * vz - uz * vy;
+      const nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const faceNy = Math.abs(ny / len);
+      steep[i0] = Math.min(steep[i0], faceNy);
+      steep[i1] = Math.min(steep[i1], faceNy);
+      steep[i2] = Math.min(steep[i2], faceNy);
+    }
+  }
+  geometry.setAttribute('aNy', new THREE.Float32BufferAttribute(steep, 1));
+  geometry.setAttribute('aShore', new THREE.Float32BufferAttribute(shore, 1));
 }
 
 function segIntersect(x1, z1, x2, z2, x3, z3, x4, z4) {

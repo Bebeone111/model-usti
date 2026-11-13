@@ -10,20 +10,24 @@
       "spawnLon": 14.040439,
       "spawnLat": 50.660244,
       "wikidata": "https://www.wikidata.org/wiki/Q12039421",
-      "text": "Hlavní náměstí Ústí nad Labem a výchozí bod procházky. Poválečná zástavba drží úřady, obchody a pěší plochy. Pod nohama je současné ortofoto ČÚZK, ne archivní snímek."
+      "text": "Hlavní náměstí Ústí nad Labem a výchozí bod procházky. Poválečná zástavba drží úřady, obchody a pěší plochy. Pod nohama je současné ortofoto ČÚZK, ne archivní snímek.",
+      "photo": "/data/poi-photos/namesti.jpg",
+      "photoCredit": "Michielverbeek, CC BY-SA 4.0"
     },
     {
       "id": "vetruse",
       "name": "Větruše",
       "lon": 14.039608,
       "lat": 50.655013,
-      "spawnLon": 14.03980,
-      "spawnLat": 50.65540,
-      "spawnYaw": 3.20,
+      "spawnLon": 14.0398,
+      "spawnLat": 50.6554,
+      "spawnYaw": 3.2,
       "spawnPitch": -0.15,
       "osm": "https://www.openstreetmap.org/way/55855582",
       "wikidata": "https://www.wikidata.org/wiki/Q11985812",
-      "text": "Výletní restaurace a vyhlídka na kopci nad Labem. Z terasy je vidět řeka a tři různé mosty. Tlačítko vyhlídky vás postaví vedle pavilonu, ne dovnitř."
+      "text": "Výletní restaurace a vyhlídka na kopci nad Labem. Z terasy je vidět řeka a tři různé mosty. Tlačítko vyhlídky vás postaví vedle pavilonu, ne dovnitř.",
+      "photo": "/data/poi-photos/vetruse.jpg",
+      "photoCredit": "ŠJů (cs:ŠJů), CC BY-SA 3.0"
     },
     {
       "id": "mariansky",
@@ -34,7 +38,9 @@
       "spawnLat": 50.66107,
       "osm": "https://www.openstreetmap.org/way/144001394",
       "wikidata": "https://www.wikidata.org/wiki/Q12035623",
-      "text": "Zavěšený most z roku 1998 (Roman Koucký, Libor Kábrt). Dva ocelové pylony stojí vedle sebe na levém, ústeckém břehu pod Mariánskou skálou. Z každého jde vějíř lan nad hlavní pole, chodník pro pěší je uprostřed a výš než vozovka."
+      "text": "Zavěšený most z roku 1998 (Roman Koucký, Libor Kábrt). Dva ocelové pylony stojí vedle sebe na levém, ústeckém břehu pod Mariánskou skálou. Z každého jde vějíř lan nad hlavní pole, chodník pro pěší je uprostřed a výš než vozovka.",
+      "photo": "/data/poi-photos/mariansky.jpg",
+      "photoCredit": "Elros MetalBlade/Jan Mareš, CC BY 3.0"
     },
     {
       "id": "benes",
@@ -45,17 +51,44 @@
       "spawnLat": 50.65989,
       "osm": "https://www.openstreetmap.org/way/238162985",
       "wikidata": "https://www.wikidata.org/wiki/Q12038766",
-      "text": "Ocelový obloukový most z roku 1936, projekt Josef Melan. Dva rovnoběžné oblouky se svislými stojkami, dva pilíře ve vodě a mírně vyklenutá vozovka. V modelu je historická ocelová konstrukce, ne staveniště rekonstrukce."
+      "text": "Ocelový obloukový most z roku 1936, projekt Josef Melan. Dva rovnoběžné oblouky se svislými stojkami, dva pilíře ve vodě a mírně vyklenutá vozovka. V modelu je historická ocelová konstrukce, ne staveniště rekonstrukce.",
+      "photo": "/data/poi-photos/benes.jpg",
+      "photoCredit": "Ondřej Kořínek, CC BY-SA 4.0"
     },
     {
       "id": "zeleznice",
       "name": "Železniční most přes Labe",
       "lon": 14.04386,
       "lat": 50.65608,
-      "spawnLon": 14.04310,
+      "spawnLon": 14.0431,
       "spawnLat": 50.65596,
       "wikidata": "https://www.wikidata.org/wiki/Q12021355",
-      "text": "Dvoukolejný ocelový příhradový most s horní mostovkou z let 1954–1957 na trati 072. Dvě souběžné konstrukce po třech polích na společných pilířích. Po dolní lávce se dá přejít, na koleje model nepouští."
+      "text": "Dvoukolejný ocelový příhradový most s horní mostovkou z let 1954–1957 na trati 072. Dvě souběžné konstrukce po třech polích na společných pilířích. Po dolní lávce se dá přejít, na koleje model nepouští.",
+      "photo": "/data/poi-photos/zeleznice.jpg",
+      "photoCredit": "ŠJů (cs:ŠJů), CC BY-SA 3.0"
+    },
+    {
+      "id": "sikma",
+      "name": "Kostel Nanebevzetí Panny Marie",
+      "lon": 14.040451,
+      "lat": 50.659072,
+      "spawnLon": 14.04055,
+      "spawnLat": 50.65945,
+      "spawnYaw": 3.05,
+      "spawnPitch": -0.12,
+      "osm": "https://www.openstreetmap.org/way/52106385",
+      "wikidata": "https://www.wikidata.org/wiki/Q12031116",
+      "text": "Gotický kostel na jižní straně Mírového náměstí. Věž se od svislice odklání asi o pět stupňů k jihu, k Labi, po poddolování. V modelu je náklon od paty, ne samostatný kvádr."
+    },
+    {
+      "id": "divadlo",
+      "name": "Divadlo",
+      "lon": 14.036,
+      "lat": 50.65928,
+      "spawnLon": 14.03635,
+      "spawnLat": 50.65945,
+      "osm": "https://www.openstreetmap.org/way/79413889",
+      "text": "Divadelní budova v bboxu centra podle OpenStreetMap (way 79413889). Činoherní studio může sídlit jinde; muzeum města v tomto výřezu pojmenované není."
     },
     {
       "id": "forum",
@@ -67,7 +100,9 @@
       "osm": "https://www.openstreetmap.org/way/52107614",
       "wikidata": "https://www.wikidata.org/wiki/Q12041840",
       "opening_hours": "Mo-Su 09:00-21:00",
-      "text": "Obchodní centrum Forum jižně od Mírového náměstí. Velká hmota u pěší zóny, v modelu podle půdorysu OpenStreetMap a výšky z mapy."
+      "text": "Obchodní centrum Forum jižně od Mírového náměstí. Velká hmota u pěší zóny, v modelu podle půdorysu OpenStreetMap a výšky z mapy.",
+      "photo": "/data/poi-photos/forum.jpg",
+      "photoCredit": "ŠJů (cs:ŠJů), CC BY-SA 3.0"
     },
     {
       "id": "nadrazi",
@@ -78,14 +113,16 @@
       "spawnLat": 50.65955,
       "osm": "https://www.openstreetmap.org/way/188090766",
       "wikidata": "https://www.wikidata.org/wiki/Q801547",
-      "text": "Hlavní nádraží na pravém břehu Labe. Železniční uzel, odkud prohlídka centra vychází k náměstí a k mostům. Trolejbusy jezdí kolem, pokud je zapnutá střední nebo vysoká kvalita."
+      "text": "Hlavní nádraží na pravém břehu Labe. Železniční uzel, odkud prohlídka centra vychází k náměstí a k mostům. Trolejbusy jezdí kolem, pokud je zapnutá střední nebo vysoká kvalita.",
+      "photo": "/data/poi-photos/nadrazi.jpg",
+      "photoCredit": "ŠJů, CC BY-SA 3.0"
     },
     {
       "id": "zdar",
       "name": "Palác Zdar",
       "lon": 14.040139,
       "lat": 50.660692,
-      "spawnLon": 14.04040,
+      "spawnLon": 14.0404,
       "spawnLat": 50.66045,
       "osm": "https://www.openstreetmap.org/way/63469970",
       "text": "Nárožní dům na Mírovém náměstí. Výška podle OpenStreetMap, fasáda je stylizovaná, ne fotografie adresy."
@@ -95,8 +132,8 @@
       "name": "Magistrát města Ústí nad Labem",
       "lon": 14.037316,
       "lat": 50.660386,
-      "spawnLon": 14.03770,
-      "spawnLat": 50.66020,
+      "spawnLon": 14.0377,
+      "spawnLat": 50.6602,
       "osm": "https://www.openstreetmap.org/way/63470030",
       "wikidata": "https://www.wikidata.org/wiki/Q156974",
       "opening_hours": "Mo-Fr 08:00-17:00",
@@ -119,18 +156,21 @@
       "name": "Kostel sv. Vojtěcha",
       "lon": 14.042236,
       "lat": 50.659081,
-      "spawnLon": 14.04185,
-      "spawnLat": 50.65915,
+      "spawnLon": 14.04162,
+      "spawnLat": 50.65902,
+      "spawnYaw": 0.4,
       "osm": "https://www.openstreetmap.org/way/43529959",
       "wikidata": "https://www.wikidata.org/wiki/Q12030288",
-      "text": "Městský kostel východně od Mírového náměstí. Kamenná loď a věž jsou vlastní mesh podle půdorysu, ne stažený model."
+      "text": "Městský kostel východně od Mírového náměstí. Kamenná loď a věž jsou vlastní mesh podle půdorysu, ne stažený model.",
+      "photo": "/data/poi-photos/vojtech.jpg",
+      "photoCredit": "ŠJů (cs:ŠJů), CC BY-SA 3.0"
     },
     {
       "id": "soutok",
       "name": "Soutok Labe a Bíliny",
       "lon": 14.04355,
       "lat": 50.6572,
-      "spawnLon": 14.04310,
+      "spawnLon": 14.0431,
       "spawnLat": 50.65755,
       "text": "Místo, kde se Bílina vlévá do Labe mezi mosty. Hladina je v modelu rovná, bez vln z terénu. Hrad Střekov leží dál na jihu, mimo tuhle procházku."
     },
@@ -140,7 +180,7 @@
       "lon": 14.027468,
       "lat": 50.6657236,
       "spawnLon": 14.02755,
-      "spawnLat": 50.66560,
+      "spawnLat": 50.6656,
       "opening_hours": "Mo-Fr 08:00-18:00; Sa 09:00-14:00",
       "text": "Kavárna u domu U Nemocnice 1763/1, mezi zdí a ulicí Palachova. Jméno v modelu používá obyčejný apostrof."
     }

@@ -1,6 +1,7 @@
 export function createAmbience() {
   let ctx = null;
   let master = null;
+  let filter = null;
   let stepAt = 0;
   let enabled = false;
 
@@ -23,7 +24,7 @@ export function createAmbience() {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
-    const filter = ctx.createBiquadFilter();
+    filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 420;
     source.connect(filter);
@@ -44,9 +45,11 @@ export function createAmbience() {
       master.gain.setTargetAtTime(enabled ? 0.012 : 0, audio.currentTime, 0.06);
       return enabled;
     },
-    presence(nearWater) {
+    presence(nearWater, windy) {
       if (!enabled || !ctx || !master) return;
-      master.gain.setTargetAtTime(nearWater ? 0.045 : 0.012, ctx.currentTime, 0.25);
+      const level = nearWater ? 0.05 : windy ? 0.028 : 0.012;
+      master.gain.setTargetAtTime(level, ctx.currentTime, 0.25);
+      if (filter) filter.frequency.setTargetAtTime(nearWater ? 280 : windy ? 900 : 420, ctx.currentTime, 0.3);
     },
     step(moving, fast) {
       if (!enabled || !ctx || !moving) return;

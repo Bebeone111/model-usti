@@ -29,6 +29,10 @@ const themes = [
   ],
   ['routes', `relation["route"="trolleybus"](${b});`],
   ['addresses', `node["addr:housenumber"](${b});`],
+  [
+    'aerialways',
+    `way["aerialway"](${b});node["aerialway"="station"](${b});way["aerialway"](50.6538,14.0269,50.668,14.055);`,
+  ],
 ];
 
 const KEEP = {
@@ -49,6 +53,8 @@ const KEEP = {
     'name',
     'addr:street',
     'addr:housenumber',
+    'ref:ruian',
+    'ref:ruian:building',
   ],
   highways: ['highway', 'footway', 'sidewalk', 'sidewalk:left', 'sidewalk:right', 'name', 'junction', 'bridge', 'railway'],
   railways: ['railway', 'bridge', 'name', 'layer', 'gauge'],
@@ -58,6 +64,7 @@ const KEEP = {
   furniture: ['amenity', 'highway', 'name', 'shelter'],
   routes: ['route', 'name', 'ref'],
   addresses: ['addr:street', 'addr:housenumber', 'addr:place', 'name'],
+  aerialways: ['aerialway', 'name', 'route'],
 };
 
 const endpoints = [
@@ -364,7 +371,7 @@ function convertTheme(name, elements) {
         else skipped += 1;
         continue;
       }
-      if (name === 'highways' || name === 'railways') {
+      if (name === 'highways' || name === 'railways' || name === 'aerialways') {
         const feature = lineFeature(el, coords, name);
         if (feature) features.push(feature);
         else skipped += 1;
@@ -896,7 +903,9 @@ let overpassUrl = null;
 const counts = {};
 const skipped = {};
 
-for (const [name, body] of selectedThemes) {
+if (process.argv.includes('--photos-only')) {
+  // OSM se při --photos-only nestahuje; fotky jsou níž.
+} else for (const [name, body] of selectedThemes) {
   const query = `[out:json][timeout:120];(${body});out geom;`;
   console.log(`OSM ${name}…`);
   try {
@@ -910,7 +919,7 @@ for (const [name, body] of selectedThemes) {
     skipped[name] = converted.skipped;
     console.log(`  ${converted.features.length} prvků, přeskočeno ${converted.skipped}, surových ${json.elements.length}`);
   } catch (error) {
-    if (name !== 'furniture' && name !== 'routes' && name !== 'railways' && name !== 'addresses') throw error;
+    if (name !== 'furniture' && name !== 'routes' && name !== 'railways' && name !== 'addresses' && name !== 'aerialways') throw error;
     console.warn(`OSM ${name} se nepodařilo stáhnout (${error.message}). Soubor zůstane prázdný.`);
     writeCollection(name, [], osmCopyright);
     counts[name] = 0;
@@ -918,7 +927,7 @@ for (const [name, body] of selectedThemes) {
   }
 }
 
-if (!only && (counts.buildings || 0) < 50) {
+if (!only && !process.argv.includes('--photos-only') && (counts.buildings || 0) < 50) {
   throw new Error('Příliš málo budov — bbox nebo Overpass nevrátil centrum.');
 }
 
@@ -949,14 +958,120 @@ function writeAddressesFromBuildings() {
   return rows.length;
 }
 
-async function tryRuianNote() {
-  const note = {
-    tried: true,
-    skipped: true,
-    reason: 'Celá obec Ústí nad Labem ve VFR/GML je moc velká na runtime model; adresy bereme z OSM v bboxu. RÚIAN se do výšek zapojí, až bude oříznutý výřez.',
-  };
-  fs.writeFileSync(path.join(dataDir, 'ruian-skip.json'), JSON.stringify(note, null, 2));
-  return note;
+async function tryRuianBbox() {
+  const url = `https://services.cuzk.cz/wfs/inspire-bu-wfs.asp?service=WFS&version=2.0.0&request=GetFeature&typeNames=bu:Building&srsName=EPSG:4326&bbox=${bbox.south},${bbox.west},${bbox.north},${bbox.east},EPSG:4326&count=20`;
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    if (text.length > 5000000 || /ExceptionReport|ServiceException/i.test(text.slice(0, 2000))) {
+      throw new Error('WFS vrátil výjimku nebo moc velkou odpověď');
+    }
+    const floors = (text.match(/storeysAboveGround|numberOfFloors|pocetPodlazi/gi) || []).length;
+    if (!floors) throw new Error('Ve výřezu nejsou podlaží');
+    fs.writeFileSync(path.join(dataDir, 'ruian-bbox.xml'), text.slice(0, 200000));
+    return { tried: true, skipped: false, floors };
+  } catch (error) {
+    const note = {
+      tried: true,
+      skipped: true,
+      reason: `RÚIAN WFS v bboxu selhal (${error.message}). Adresy a výšky bereme z OSM v bboxu; credit RÚIAN v UI je vypnutý.`,
+    };
+    fs.writeFileSync(path.join(dataDir, 'ruian-skip.json'), JSON.stringify(note, null, 2));
+    return note;
+  }
+}
+
+const POI_PHOTOS = [
+  ['namesti', 'Mírové náměstí Ústí nad Labem'],
+  ['vetruse', 'Větruše Ústí'],
+  ['mariansky', 'Mariánský most Ústí'],
+  ['benes', 'Most Dr. Edvarda Beneše'],
+  ['zeleznice', 'Železniční most Ústí nad Labem'],
+  ['forum', 'OC Forum Ústí'],
+  ['nadrazi', 'Ústí nad Labem hlavní nádraží'],
+  ['pavel', 'Chrám apoštola Pavla Ústí'],
+  ['vojtech', 'Kostel svatého Vojtěcha Ústí'],
+  ['sikma', 'Kostel Nanebevzetí Panny Marie Ústí šikmá věž'],
+  ['divadlo', 'Divadlo Ústí nad Labem'],
+];
+
+function freeLicense(license) {
+  const text = String(license || '').toLowerCase();
+  return /cc0|public domain|cc by|cc-by|gfdl/.test(text) && !/cc by-nc|cc-by-nc|nd/.test(text);
+}
+
+async function downloadPoiPhotos() {
+  const dir = path.join(dataDir, 'poi-photos');
+  fs.mkdirSync(dir, { recursive: true });
+  const index = [];
+  for (const [id, query] of POI_PHOTOS) {
+    try {
+      const api = new URL('https://commons.wikimedia.org/w/api.php');
+      api.searchParams.set('action', 'query');
+      api.searchParams.set('format', 'json');
+      api.searchParams.set('origin', '*');
+      api.searchParams.set('generator', 'search');
+      api.searchParams.set('gsrsearch', query);
+      api.searchParams.set('gsrnamespace', '6');
+      api.searchParams.set('gsrlimit', '5');
+      api.searchParams.set('prop', 'imageinfo');
+      api.searchParams.set('iiprop', 'url|extmetadata|size|mime');
+      api.searchParams.set('iiurlwidth', '640');
+      const res = await fetch(api, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const pages = Object.values(json.query?.pages || {});
+      let picked = null;
+      for (const page of pages) {
+        const info = page.imageinfo?.[0];
+        const meta = info?.extmetadata || {};
+        const license = meta.LicenseShortName?.value || meta.License?.value || '';
+        if (!info?.thumburl && !info?.url) continue;
+        if (!freeLicense(license) && !/public domain/i.test(meta.LicenseShortName?.value || '')) continue;
+        picked = {
+          id,
+          title: page.title,
+          url: info.thumburl || info.url,
+          license,
+          artist: String(meta.Artist?.value || '').replace(/<[^>]+>/g, '').trim(),
+        };
+        break;
+      }
+      if (!picked) continue;
+      const img = await fetch(picked.url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20000) });
+      if (!img.ok) continue;
+      const buf = Buffer.from(await img.arrayBuffer());
+      if (buf.length > 450000) continue;
+      const file = `${id}.jpg`;
+      fs.writeFileSync(path.join(dir, file), buf);
+      index.push({ ...picked, file });
+      console.log(`  fotka ${id} (${picked.license})`);
+    } catch (error) {
+      console.warn(`  fotka ${id} přeskočena (${error.message})`);
+    }
+  }
+  fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(index, null, 2));
+  return index;
+}
+
+if (process.argv.includes('--photos-only')) {
+  console.log('Wikimedia Commons fotky…');
+  const photos = await downloadPoiPhotos();
+  if (photos.length) {
+    const poiPath = path.join(dataDir, 'pois.json');
+    const pois = JSON.parse(fs.readFileSync(poiPath, 'utf8'));
+    const byId = new Map(photos.map((row) => [row.id, row]));
+    for (const feature of pois.features || []) {
+      const shot = byId.get(feature.id);
+      if (!shot) continue;
+      feature.photo = `/data/poi-photos/${shot.file}`;
+      feature.photoCredit = `${shot.artist || 'autor na Wikimedia Commons'}, ${shot.license}`.trim();
+    }
+    fs.writeFileSync(poiPath, JSON.stringify(pois, null, 2));
+  }
+  console.log(JSON.stringify({ photos: photos.length }, null, 2));
+  process.exit(0);
 }
 
 if (only) {
@@ -977,7 +1092,26 @@ if (only) {
 }
 
 const addressCount = writeAddressesFromBuildings();
-await tryRuianNote();
+const ruian = await tryRuianBbox();
+let photos = [];
+try {
+  console.log('Wikimedia Commons fotky…');
+  photos = await downloadPoiPhotos();
+} catch (error) {
+  console.warn(`Fotky se nestáhly (${error.message}).`);
+}
+if (photos.length) {
+  const poiPath = path.join(dataDir, 'pois.json');
+  const pois = JSON.parse(fs.readFileSync(poiPath, 'utf8'));
+  const byId = new Map(photos.map((row) => [row.id, row]));
+  for (const feature of pois.features || []) {
+    const shot = byId.get(feature.id);
+    if (!shot) continue;
+    feature.photo = `/data/poi-photos/${shot.file}`;
+    feature.photoCredit = `${shot.artist || 'autor na Wikimedia Commons'}, ${shot.license}`.trim();
+  }
+  fs.writeFileSync(poiPath, JSON.stringify(pois, null, 2));
+}
 if (!only && selectedThemes.some(([name]) => name === 'railways' || name === 'buildings')) {
   console.log(`Adresy z OSM: ${addressCount}`);
 }
@@ -1010,10 +1144,14 @@ const meta = {
     mobile: ortho.mobile,
   },
   terrain,
+  ruian,
+  photos: photos.map((row) => ({ id: row.id, license: row.license, artist: row.artist })),
   licenses: {
     osm: 'Open Database License (ODbL) 1.0',
     ortofoto: 'Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK',
     dmr5g: terrain.license,
+    ...(ruian?.skipped ? {} : { ruian: 'Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK RÚIAN' }),
+    ...(photos.length ? { commons: 'Wikimedia Commons, licence u jednotlivých fotek' } : {}),
   },
 };
 fs.writeFileSync(path.join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2));
