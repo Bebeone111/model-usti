@@ -1720,14 +1720,14 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const nx = uy * vz - uz * vy;
       const nz = ux * vy - uy * vx;
       const len = Math.hypot(nx, ny, nz) || 1;
-      if (ny / len > 0.42) continue;
+      if (ny / len > 0.62) continue;
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);
-      if (!inside && shore > 22) continue;
+      if (!inside && shore > 70) continue;
       const low = Math.min(ay, by, cy);
-      const cap = y0 + (inside ? -0.4 : 0.55 + Math.min(shore, 20) * 0.06);
-      const next = Math.min(low + 0.35, cap);
+      const cap = y0 + (inside ? -0.4 : 0.35 + Math.min(shore, 24) * 0.07);
+      const next = Math.min(low + 0.25, cap);
       pos.setY(i0, Math.min(ay, next));
       pos.setY(i1, Math.min(by, next));
       pos.setY(i2, Math.min(cy, next));
