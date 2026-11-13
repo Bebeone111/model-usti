@@ -186,8 +186,13 @@ const api = {
     return { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, lon, lat, camBack, pointerLocked };
   },
   setState(next) {
-    const x = Number.isFinite(next.x) ? next.x : player.x;
-    const z = Number.isFinite(next.z) ? next.z : player.z;
+    let x = Number.isFinite(next.x) ? next.x : player.x;
+    let z = Number.isFinite(next.z) ? next.z : player.z;
+    if (Number.isFinite(next.lon) && Number.isFinite(next.lat)) {
+      const local = projector.toLocal(next.lon, next.lat);
+      x = local[0];
+      z = local[1];
+    }
     placeNear(x, z, next.yaw, next.pitch);
     if (Number.isFinite(next.camBack)) camBack = Math.min(22, Math.max(2.6, next.camBack));
   },
@@ -1440,7 +1445,7 @@ async function boot() {
     projector,
     sample: terrain.sample.bind(terrain),
     waterY: city.waterY ?? 0.9,
-    detail: quality !== 'low',
+    detail: true,
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
@@ -1521,11 +1526,14 @@ async function boot() {
     },
   });
   daylight = createDaylight({ hemi, sun, sky, fog: scene.fog, scene, camera });
-  const hashed = readHash();
-  if (hashed) {
+  const applyHash = () => {
+    const hashed = readHash();
+    if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    placeNear(x, z, hashed[2], hashed[3]);
-  }
+    return placeNear(x, z, hashed[2], hashed[3]);
+  };
+  applyHash();
+  window.addEventListener('hashchange', applyHash);
   applyQuality(quality);
   api.labels = city.labelPoints;
   api.ready = true;

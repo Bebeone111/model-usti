@@ -46,21 +46,33 @@ function lineLen(pts) {
   return len;
 }
 
-function pickLine(lines, fallback, projector) {
-  let best = null;
-  let bestLen = 0;
-  for (const line of lines) {
-    const len = lineLen(line.pts);
-    if (len > bestLen) {
-      best = line;
-      bestLen = len;
-    }
-  }
-  if (best && bestLen > 40) return best.pts;
+function fallbackPts(fallback, projector) {
   return fallback.map(([lon, lat]) => {
     const [x, z] = projector.toLocal(lon, lat);
     return { x, z };
   });
+}
+
+function pickLine(lines, fallback, projector, nearLon = null, nearLat = null) {
+  let best = null;
+  let bestScore = -Infinity;
+  const target = nearLon != null ? projector.toLocal(nearLon, nearLat) : null;
+  for (const line of lines) {
+    const len = lineLen(line.pts);
+    if (len < 30) continue;
+    let score = len;
+    if (target) {
+      const mid = line.pts[Math.floor(line.pts.length / 2)];
+      const dist = Math.hypot(mid.x - target[0], mid.z - target[1]);
+      score = len - dist * 2.4;
+    }
+    if (score > bestScore) {
+      best = line;
+      bestScore = score;
+    }
+  }
+  if (best && lineLen(best.pts) > 40) return best.pts;
+  return fallbackPts(fallback, projector);
 }
 
 function resample(pts, step = 5) {
@@ -133,6 +145,25 @@ function cylGeo(x, y, z, radius, height, yaw = 0, radial = 8) {
   geo.translate(0, height / 2, 0);
   geo.rotateY(yaw);
   geo.translate(x, y, z);
+  return geo;
+}
+
+const _up = new THREE.Vector3(0, 1, 0);
+const _dir = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+
+function strut(ax, ay, az, bx, by, bz, radius, radial = 5) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const dz = bz - az;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 0.08) return null;
+  const geo = new THREE.CylinderGeometry(radius, radius, len, radial);
+  geo.translate(0, len / 2, 0);
+  _dir.set(dx, dy, dz).normalize();
+  _quat.setFromUnitVectors(_up, _dir);
+  geo.applyQuaternion(_quat);
+  geo.translate(ax, ay, az);
   return geo;
 }
 
@@ -320,67 +351,77 @@ function buildMarian(pts, waterY, sample, detail) {
   const fr = frames(resample(pts, 6));
   const half = 8.4;
   const steel = new THREE.MeshLambertMaterial({ color: 0xcfd6dc, emissive: 0x6a7884, emissiveIntensity: 0.08 });
-  const pale = new THREE.MeshLambertMaterial({ color: 0xe8eef2, emissive: 0x8aa0b0, emissiveIntensity: 0.12 });
+  const pale = new THREE.MeshLambertMaterial({ color: 0xe8eef2, emissive: 0x9eb0be, emissiveIntensity: 0.22 });
   const road = new THREE.MeshLambertMaterial({ color: 0x4a5158 });
   const walk = new THREE.MeshLambertMaterial({ color: 0xd9d2c6 });
-  const cablePts = [];
-  const deckGeo = deckMesh(fr, deckY, half);
-  const walkGeo = deckMesh(fr, deckY + 1.15, 1.7);
+  const cableGeos = [];
   const pylonGeos = [];
   const tPylon = northEndT(pts);
-  const base = pathAt(pts, tPylon);
-  const toward = tPylon < 0.5 ? 1 : -1;
+  const abut = pathAt(pts, tPylon);
+  const intoSpan = tPylon < 0.5 ? 1 : -1;
+  const ontoBank = -intoSpan;
+  const h = 74;
+  const baseY = deckY - 3.2;
   const pylons = [];
   for (const side of [-1, 1]) {
-    const x = base.x + base.nx * 5.4 * side - base.tx * toward * 6;
-    const z = base.z + base.nz * 5.4 * side - base.tz * toward * 6;
-    const y = sample(x, z);
-    const h = 73;
-    const lean = 0.09 * toward;
-    const shaft = new THREE.BoxGeometry(2.4, h, 3.1);
+    const x = abut.x + abut.nx * 7.2 * side + abut.tx * ontoBank * 10;
+    const z = abut.z + abut.nz * 7.2 * side + abut.tz * ontoBank * 10;
+    const yaw = Math.atan2(abut.tx, abut.tz);
+    const shaft = new THREE.BoxGeometry(4.2, h, 6.4);
     shaft.translate(0, h / 2, 0);
-    shaft.rotateZ(side * 0.04);
-    shaft.rotateX(lean);
-    shaft.rotateY(Math.atan2(base.tx, base.tz));
-    shaft.translate(x, y, z);
+    shaft.rotateX(intoSpan * 0.11);
+    shaft.rotateY(yaw);
+    shaft.translate(x, baseY, z);
     pylonGeos.push(shaft);
-    const top = new THREE.Vector3(x + base.tx * toward * 6.4, y + h * 0.96, z + base.tz * toward * 6.4);
-    pylons.push({ x, z, y, top, side });
+    const cap = new THREE.BoxGeometry(5.2, 2.4, 7.2);
+    cap.translate(0, h + 0.6, 0);
+    cap.rotateX(intoSpan * 0.11);
+    cap.rotateY(yaw);
+    cap.translate(x, baseY, z);
+    pylonGeos.push(cap);
+    const top = new THREE.Vector3(
+      x + abut.tx * intoSpan * 8.2,
+      baseY + h * 0.97,
+      z + abut.tz * intoSpan * 8.2,
+    );
+    pylons.push({ x, z, y: baseY, top, side });
   }
-  const spanStart = tPylon < 0.5 ? 0.16 : 0.18;
-  const spanEnd = tPylon < 0.5 ? 0.92 : 0.84;
-  const n = detail ? 15 : 9;
+  pylonGeos.push(strut(pylons[0].top.x, pylons[0].top.y, pylons[0].top.z, pylons[1].top.x, pylons[1].top.y, pylons[1].top.z, 0.55, 6));
+  const spanStart = tPylon < 0.5 ? 0.18 : 0.12;
+  const spanEnd = tPylon < 0.5 ? 0.96 : 0.82;
+  const n = 15;
   for (const pylon of pylons) {
     for (let i = 0; i < n; i++) {
-      const t = spanStart + (spanEnd - spanStart) * ((i + 0.5) / n);
+      const t = spanStart + (spanEnd - spanStart) * ((i + 0.08) / (n - 0.2));
       const at = pathAt(pts, t);
-      const deck = new THREE.Vector3(at.x + at.nx * 3.2 * pylon.side, deckY + 1.2, at.z + at.nz * 3.2 * pylon.side);
-      cablePts.push(pylon.top.clone(), deck);
+      const deck = {
+        x: at.x + at.nx * 1.15 * pylon.side,
+        y: deckY + 1.32,
+        z: at.z + at.nz * 1.15 * pylon.side,
+      };
+      cableGeos.push(strut(pylon.top.x, pylon.top.y, pylon.top.z, deck.x, deck.y, deck.z, 0.11, 4));
     }
   }
   const ramps = addRamps(fr, deckY, sample, half);
   const group = new THREE.Group();
   group.name = 'mariansky';
-  const roadMesh = merge([deckGeo], road);
-  const walkMesh = merge([walkGeo], walk);
-  const pylonMesh = merge(pylonGeos, pale);
+  const roadMesh = merge([deckMesh(fr, deckY, half)], road);
+  const walkMesh = merge([deckMesh(fr, deckY + 1.18, 1.85)], walk);
+  const pylonMesh = merge(pylonGeos.filter(Boolean), pale);
+  const cableMesh = merge(cableGeos.filter(Boolean), pale);
   const extra = merge(rampGeos(ramps), steel);
   if (roadMesh) group.add(roadMesh);
   if (walkMesh) group.add(walkMesh);
   if (pylonMesh) group.add(pylonMesh);
+  if (cableMesh) group.add(cableMesh);
   if (extra) group.add(extra);
-  if (cablePts.length) {
-    const cableGeo = new THREE.BufferGeometry().setFromPoints(cablePts);
-    const cables = new THREE.LineSegments(cableGeo, new THREE.LineBasicMaterial({ color: 0xe7eef4, transparent: true, opacity: 0.92 }));
-    cables.userData.noShadow = true;
-    group.add(cables);
-  }
   const rails = [];
   for (let i = 0; i < fr.length; i += detail ? 1 : 2) {
     const p = fr[i];
     for (const side of [-1, 1]) {
       rails.push(boxGeo(p.x + p.nx * half * side, deckY, p.z + p.nz * half * side, 0.08, 1.15, 0.08, Math.atan2(p.tx, p.tz)));
     }
+    rails.push(boxGeo(p.x, deckY + 1.18, p.z, 0.08, 1.05, 0.08, Math.atan2(p.tx, p.tz)));
   }
   const railMesh = merge(rails, steel);
   if (railMesh) group.add(railMesh);
@@ -388,64 +429,79 @@ function buildMarian(pts, waterY, sample, detail) {
     group,
     decks: [deckRecord(fr, deckY + 0.04, half)],
     rails: railBlockers(fr, half, deckY),
-    lights: pylons.map((p) => ({ x: p.x, y: p.y + 8, z: p.z })),
+    lights: pylons.map((p) => ({ x: p.x, y: p.y + 12, z: p.z })),
   };
 }
 
 function buildBenes(pts, waterY, sample, detail) {
   const deckY = waterY + 7.8;
   const camber = 3.4;
-  const fr = frames(resample(pts, 5.15));
+  const rise = 22;
+  const fr = frames(resample(pts, 4.2));
   const half = 8.88;
-  const steel = new THREE.MeshLambertMaterial({ color: 0x8e8a82, emissive: 0x3a342c, emissiveIntensity: 0.06 });
-  const rust = new THREE.MeshLambertMaterial({ color: 0x6e675c });
+  const steel = new THREE.MeshLambertMaterial({ color: 0x8e8a82, emissive: 0x3a342c, emissiveIntensity: 0.08 });
+  const rust = new THREE.MeshLambertMaterial({ color: 0x7a7368, emissive: 0x2a241c, emissiveIntensity: 0.05 });
   const road = new THREE.MeshLambertMaterial({ color: 0x42484f });
-  const geos = [deckMesh(fr, deckY, half, camber)];
+  const walk = new THREE.MeshLambertMaterial({ color: 0xcfc6b8 });
+  const archGeos = [];
   const hangers = [];
-  const n = detail ? 21 : 11;
-  const total = Math.max(1, fr.length - 1);
+  const t0 = 0.07;
+  const t1 = 0.93;
+  const hangerN = 21;
+  const archSamples = 36;
+  const archAt = (t, side) => {
+    const u = (t - t0) / (t1 - t0);
+    const at = pathAt(pts, t);
+    const yDeck = deckY + camber * Math.sin(Math.max(0, Math.min(1, u)) * Math.PI);
+    const arch = rise * Math.sin(Math.max(0, Math.min(1, u)) * Math.PI);
+    return {
+      x: at.x + at.nx * 7.35 * side,
+      y: yDeck + arch,
+      z: at.z + at.nz * 7.35 * side,
+      yDeck,
+      at,
+    };
+  };
   for (const side of [-1, 1]) {
-    for (let i = 0; i < n; i++) {
-      const t = (i + 0.5) / n;
-      const at = pathAt(pts, 0.08 + 0.84 * t);
-      const yDeck = deckY + camber * Math.sin(t * Math.PI);
-      const arch = 22 * Math.sin(t * Math.PI);
-      hangers.push(cylGeo(at.x + at.nx * 7.1 * side, yDeck, at.z + at.nz * 7.1 * side, 0.12, arch, 0, 5));
+    let prev = null;
+    for (let i = 0; i <= archSamples; i++) {
+      const t = t0 + (t1 - t0) * (i / archSamples);
+      const p = archAt(t, side);
+      if (prev) archGeos.push(strut(prev.x, prev.y, prev.z, p.x, p.y, p.z, 0.42, 6));
+      prev = p;
     }
-    for (let i = 0; i < fr.length; i++) {
-      const t = i / total;
-      const p = fr[i];
-      const yDeck = deckY + camber * Math.sin(t * Math.PI);
-      const arch = 22 * Math.sin(t * Math.PI);
-      const x = p.x + p.nx * 7.1 * side;
-      const z = p.z + p.nz * 7.1 * side;
-      const next = fr[Math.min(fr.length - 1, i + 1)];
-      const span = Math.max(2.2, Math.hypot(next.x - p.x, next.z - p.z) * 1.05);
-      geos.push(boxGeo(x, yDeck + arch - 0.25, z, 0.48, 0.48, span, Math.atan2(p.tx, p.tz)));
+    for (let i = 0; i < hangerN; i++) {
+      const t = t0 + (t1 - t0) * ((i + 0.5) / hangerN);
+      const p = archAt(t, side);
+      hangers.push(strut(p.x, p.yDeck + 0.15, p.z, p.x, p.y - 0.2, p.z, 0.09, 5));
     }
   }
-  for (let i = 0; i < fr.length; i += Math.max(1, Math.round(fr.length / 9))) {
-    const t = i / total;
-    const p = fr[i];
-    const yDeck = deckY + camber * Math.sin(t * Math.PI);
-    const arch = 22 * Math.sin(t * Math.PI);
-    geos.push(boxGeo(p.x, yDeck + arch, p.z, 14.4, 0.45, 0.45, Math.atan2(p.nx, p.nz)));
+  for (let i = 0; i <= 8; i++) {
+    const t = t0 + (t1 - t0) * (i / 8);
+    const a = archAt(t, -1);
+    const b = archAt(t, 1);
+    archGeos.push(strut(a.x, a.y, a.z, b.x, b.y, b.z, 0.28, 5));
   }
   const pierA = pathAt(pts, 0.28);
   const pierB = pathAt(pts, 0.72);
   for (const p of [pierA, pierB]) {
-    geos.push(boxGeo(p.x, waterY - 2, p.z, 5.4, deckY - waterY + 3.2, 3.4, Math.atan2(p.tx, p.tz)));
+    archGeos.push(boxGeo(p.x, waterY - 2.4, p.z, 6.2, deckY - waterY + 4.2, 4.2, Math.atan2(p.tx, p.tz)));
   }
   const ramps = addRamps(fr, deckY, sample, half);
   const group = new THREE.Group();
   group.name = 'benes';
-  const roadMesh = merge([geos[0], ...rampGeos(ramps)], road);
-  const steelMesh = merge(geos.slice(1), steel);
-  const hangerMesh = merge(hangers, rust);
+  const roadMesh = merge([deckMesh(fr, deckY, half - 2.1, camber), ...rampGeos(ramps)], road);
+  const walkL = deckMesh(fr.map((p) => ({ ...p, x: p.x + p.nx * (half - 1.05), z: p.z + p.nz * (half - 1.05) })), deckY + 0.12, 1.15, camber);
+  const walkR = deckMesh(fr.map((p) => ({ ...p, x: p.x - p.nx * (half - 1.05), z: p.z - p.nz * (half - 1.05) })), deckY + 0.12, 1.15, camber);
+  const walkMesh = merge([walkL, walkR], walk);
+  const steelMesh = merge(archGeos.filter(Boolean), steel);
+  const hangerMesh = merge(hangers.filter(Boolean), rust);
   if (roadMesh) group.add(roadMesh);
+  if (walkMesh) group.add(walkMesh);
   if (steelMesh) group.add(steelMesh);
   if (hangerMesh) group.add(hangerMesh);
   const rails = [];
+  const total = Math.max(1, fr.length - 1);
   for (let i = 0; i < fr.length; i += detail ? 1 : 2) {
     const p = fr[i];
     const y = deckY + camber * Math.sin((i / total) * Math.PI);
@@ -462,60 +518,104 @@ function buildBenes(pts, waterY, sample, detail) {
 }
 
 function buildRail(pts, waterY, sample, detail) {
-  const deckY = waterY + 7.4;
-  const fr = frames(resample(pts, 8));
-  const half = 6.1;
-  const steel = new THREE.MeshLambertMaterial({ color: 0x6d7176, emissive: 0x222428, emissiveIntensity: 0.05 });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x3c4046 });
-  const walk = new THREE.MeshLambertMaterial({ color: 0xb7b1a6 });
+  const topY = waterY + 12.4;
+  const botY = waterY + 6.2;
+  const fr = frames(resample(pts, detail ? 6.5 : 9));
+  const steel = new THREE.MeshLambertMaterial({ color: 0x6a6e74, emissive: 0x1c1e22, emissiveIntensity: 0.08 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x3a3e44 });
+  const walk = new THREE.MeshLambertMaterial({ color: 0xc2bbb0 });
   const geos = [];
-  const walkGeos = [deckMesh(fr, deckY - 5.4, 1.35)];
+  const sleepers = [];
   const tracks = [];
+  const trussHalf = 5.4;
+  const walkShift = -trussHalf - 1.15;
   for (const side of [-1, 1]) {
-    const shift = 2.7 * side;
-    const local = fr.map((p) => ({ ...p, x: p.x + p.nx * shift, z: p.z + p.nz * shift }));
-    geos.push(deckMesh(local, deckY, 2.55));
-    const nBay = detail ? 16 : 9;
-    for (let i = 0; i < local.length - 1; i++) {
-      const a = local[i];
-      const b = local[i + 1];
-      const yaw = Math.atan2(a.tx, a.tz);
-      geos.push(boxGeo(a.x, deckY - 5.2, a.z, 0.22, 5.2, 0.22, yaw));
-      if (i % Math.max(1, Math.round(local.length / nBay)) === 0) {
-        geos.push(boxGeo(a.x, deckY - 5.2, a.z, 5.1, 0.22, 0.22, yaw));
-        geos.push(boxGeo((a.x + b.x) / 2, deckY - 2.6, (a.z + b.z) / 2, 0.16, 0.16, Math.hypot(b.x - a.x, b.z - a.z), yaw));
+    const chord = fr.map((p) => ({
+      x: p.x + p.nx * trussHalf * side,
+      z: p.z + p.nz * trussHalf * side,
+      tx: p.tx,
+      tz: p.tz,
+    }));
+    for (let i = 1; i < chord.length; i++) {
+      const a = chord[i - 1];
+      const b = chord[i];
+      geos.push(strut(a.x, botY, a.z, b.x, botY, b.z, 0.22, 5));
+      geos.push(strut(a.x, topY, a.z, b.x, topY, b.z, 0.22, 5));
+    }
+    for (let i = 0; i < chord.length; i++) {
+      const a = chord[i];
+      geos.push(strut(a.x, botY, a.z, a.x, topY, a.z, 0.16, 5));
+      if (i + 1 < chord.length) {
+        const b = chord[i + 1];
+        if (i % 2 === 0) geos.push(strut(a.x, botY, a.z, b.x, topY, b.z, 0.12, 4));
+        else geos.push(strut(a.x, topY, a.z, b.x, botY, b.z, 0.12, 4));
       }
     }
-    tracks.push(deckRecord(local, deckY + 0.2, 2.4, false));
+    tracks.push(deckRecord(
+      fr.map((p) => ({ ...p, x: p.x + p.nx * 2.4 * side, z: p.z + p.nz * 2.4 * side })),
+      topY + 0.25,
+      2.2,
+      false,
+    ));
   }
-  for (const t of [0.2, 0.5, 0.8]) {
+  for (let i = 0; i < fr.length; i++) {
+    const p = fr[i];
+    geos.push(strut(
+      p.x + p.nx * trussHalf,
+      topY,
+      p.z + p.nz * trussHalf,
+      p.x - p.nx * trussHalf,
+      topY,
+      p.z - p.nz * trussHalf,
+      0.14,
+      4,
+    ));
+    geos.push(strut(
+      p.x + p.nx * trussHalf,
+      botY,
+      p.z + p.nz * trussHalf,
+      p.x - p.nx * trussHalf,
+      botY,
+      p.z - p.nz * trussHalf,
+      0.14,
+      4,
+    ));
+    sleepers.push(boxGeo(p.x, topY, p.z, trussHalf * 2 - 0.4, 0.16, 0.28, Math.atan2(p.nx, p.nz)));
+  }
+  for (const t of [1 / 6, 0.5, 5 / 6]) {
     const p = pathAt(pts, t);
-    geos.push(boxGeo(p.x, waterY - 1.6, p.z, 7.4, deckY - waterY + 2.2, 3.6, Math.atan2(p.tx, p.tz)));
+    geos.push(boxGeo(p.x, waterY - 1.8, p.z, trussHalf * 2 + 1.6, botY - waterY + 2.4, 3.8, Math.atan2(p.tx, p.tz)));
   }
-  const ramps = addRamps(fr.map((p) => ({ x: p.x + p.nx * -5.2, z: p.z + p.nz * -5.2 })), deckY - 5.4, sample, 1.35);
+  const walkFr = fr.map((p) => ({ ...p, x: p.x + p.nx * walkShift, z: p.z + p.nz * walkShift }));
+  const walkGeos = [deckMesh(walkFr, botY + 0.08, 1.25)];
+  const ramps = addRamps(walkFr, botY + 0.08, sample, 1.25);
   const group = new THREE.Group();
   group.name = 'zeleznice';
-  const steelMesh = merge(geos, steel);
+  const steelMesh = merge(geos.filter(Boolean), steel);
   const walkMesh = merge([...walkGeos, ...rampGeos(ramps)], walk);
   const trackMesh = merge(
-    fr.flatMap((p) => [
-      boxGeo(p.x + p.nx * 1.6, deckY, p.z + p.nz * 1.6, 0.18, 0.18, 1.2, Math.atan2(p.tx, p.tz)),
-      boxGeo(p.x - p.nx * 1.6, deckY, p.z - p.nz * 1.6, 0.18, 0.18, 1.2, Math.atan2(p.tx, p.tz)),
-    ]),
+    [
+      ...sleepers,
+      ...fr.flatMap((p) => [
+        boxGeo(p.x + p.nx * 0.95, topY + 0.16, p.z + p.nz * 0.95, 0.16, 0.14, 1.3, Math.atan2(p.tx, p.tz)),
+        boxGeo(p.x - p.nx * 0.95, topY + 0.16, p.z - p.nz * 0.95, 0.16, 0.14, 1.3, Math.atan2(p.tx, p.tz)),
+        boxGeo(p.x + p.nx * 2.55, topY + 0.16, p.z + p.nz * 2.55, 0.16, 0.14, 1.3, Math.atan2(p.tx, p.tz)),
+        boxGeo(p.x - p.nx * 2.55, topY + 0.16, p.z - p.nz * 2.55, 0.16, 0.14, 1.3, Math.atan2(p.tx, p.tz)),
+      ]),
+    ],
     dark,
   );
   if (steelMesh) group.add(steelMesh);
   if (walkMesh) group.add(walkMesh);
   if (trackMesh) group.add(trackMesh);
-  const walkFr = fr.map((p) => ({ ...p, x: p.x + p.nx * -5.2, z: p.z + p.nz * -5.2 }));
   return {
     group,
-    decks: [deckRecord(walkFr, deckY - 5.35, 1.4), ...tracks],
+    decks: [deckRecord(walkFr, botY + 0.12, 1.35), ...tracks],
     rails: [
-      ...railBlockers(walkFr, 1.4, deckY - 5.4),
+      ...railBlockers(walkFr, 1.35, botY),
       ...tracks.map((track) => ({ ...track, blocksWalk: true, kind: 'track' })),
     ],
-    lights: [{ x: pathAt(pts, 0.5).x, y: deckY + 2, z: pathAt(pts, 0.5).z }],
+    lights: [{ x: pathAt(pts, 0.5).x, y: topY + 1.2, z: pathAt(pts, 0.5).z }],
   };
 }
 
@@ -524,17 +624,23 @@ export function addSignatureBridges(group, { highways, railways, projector, samp
     namedLines(highways, projector, (tags) => /Mariánský most/i.test(tags.name || '')),
     MARIAN_FALLBACK,
     projector,
+    14.0536,
+    50.6603,
   );
   const benesPts = pickLine(
     namedLines(highways, projector, (tags) => /Beneše/i.test(tags.name || '') && tags.bridge === 'yes'),
     BENES_FALLBACK,
     projector,
+    14.04694,
+    50.65944,
   );
   const railPts = pickLine(
-    namedLines(railways, projector, (tags) => tags.railway === 'rail' && tags.bridge === 'yes')
-      .concat(namedLines(highways, projector, (tags) => tags.railway === 'rail' && tags.bridge === 'yes')),
+    namedLines(railways, projector, (tags) => tags.railway === 'rail' && (tags.bridge === 'yes' || tags.bridge === 'viaduct'))
+      .concat(namedLines(highways, projector, (tags) => tags.railway === 'rail')),
     RAIL_FALLBACK,
     projector,
+    14.04386,
+    50.65608,
   );
   const parts = [
     buildMarian(marianPts, waterY, sample, detail),
