@@ -478,6 +478,32 @@ function placeNear(x, z, yaw, pitch) {
   return true;
 }
 
+function yawAlongDeck(deck, towardNorth = true) {
+  let tx = deck.tx || 0;
+  let tz = deck.tz || 0;
+  if (Math.hypot(tx, tz) < 0.05) {
+    const dx = deck.maxX - deck.minX;
+    const dz = deck.maxZ - deck.minZ;
+    tx = dx >= dz ? 1 : 0;
+    tz = dx >= dz ? 0 : 1;
+  }
+  if (towardNorth && tz < 0) {
+    tx = -tx;
+    tz = -tz;
+  }
+  return Math.atan2(-tx, -tz);
+}
+
+function faceMarianDeck() {
+  const snap = nearestWalkDeck(collision.decks, player.x, player.z, 90);
+  if (!snap) return;
+  player.x = snap.cx;
+  player.z = snap.cz;
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
+  player.yaw = yawAlongDeck(snap.deck, true);
+  player.pitch = -0.08;
+}
+
 function goHome() {
   if (!api.start) return;
   placeNear(api.start.x, api.start.z, api.start.yaw, -0.4);
@@ -1638,7 +1664,11 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    return placeNear(x, z, hashed[2], hashed[3]);
+    const ok = placeNear(x, z, hashed[2], hashed[3]);
+    if (ok && Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
+      faceMarianDeck();
+    }
+    return ok;
   };
   applyHash();
   window.addEventListener('hashchange', applyHash);

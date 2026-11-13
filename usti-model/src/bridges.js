@@ -301,6 +301,7 @@ function deckRecord(fr, y, half, walk = true) {
     minZ = Math.min(minZ, z);
     maxZ = Math.max(maxZ, z);
   }
+  const mid = fr[Math.floor(fr.length / 2)] || fr[0];
   return {
     outer,
     holes: [],
@@ -310,6 +311,8 @@ function deckRecord(fr, y, half, walk = true) {
     maxZ,
     y,
     walk,
+    tx: mid?.tx || 0,
+    tz: mid?.tz || 0,
     blocksWalk: false,
     blocksCamera: false,
     kind: 'deck',
@@ -385,7 +388,7 @@ function buildMarian(pts, waterY, sample, detail) {
   const fr = frames(resample(pts, 4.2));
   const half = 8.55;
   const steel = new THREE.MeshLambertMaterial({ color: 0xcfd6dc, emissive: 0x6a7884, emissiveIntensity: 0.08 });
-  const pale = new THREE.MeshLambertMaterial({ color: 0xe8eef2, emissive: 0x9eb0be, emissiveIntensity: 0.22 });
+  const pale = new THREE.MeshLambertMaterial({ color: 0xf4f8fb, emissive: 0xc5d4e0, emissiveIntensity: 0.42 });
   const road = new THREE.MeshLambertMaterial({ color: 0x4a5158 });
   const walk = new THREE.MeshLambertMaterial({ color: 0xd9d2c6 });
   const cableGeos = [];

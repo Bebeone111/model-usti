@@ -1018,10 +1018,10 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const az = a[1] + dz * t0;
         const bx = a[0] + dx * t1;
         const bz = a[1] + dz * t1;
-        const inward = (dz / len) * 5.2;
-        const inwZ = (-dx / len) * 5.2;
-        pushRibbon(gravel, ax, az, bx, bz, inward, inwZ, () => waterY + 1.15, 0, waterY + 1.2);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.8, (-dx / len) * 1.8, () => waterY, 0.04, waterY + 0.1);
+        const landX = (-dz / len) * 5.4;
+        const landZ = (dx / len) * 5.4;
+        pushRibbon(gravel, ax, az, bx, bz, landX, landZ, () => waterY + 1.18, 0, waterY + 1.22);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.4, (-dx / len) * 1.4, () => waterY, 0.04, waterY + 0.1);
         const yb = waterY - 0.2;
         const yt = waterY + 1.25;
         quay.push(ax, yb, az, bx, yb, bz, bx, yt, bz, ax, yb, az, bx, yt, bz, ax, yt, az);

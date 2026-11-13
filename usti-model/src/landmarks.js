@@ -148,23 +148,23 @@ function vetruse(group, hero) {
     opacity: 0.7,
   });
   const trim = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 });
-  addBox(group, cream, x, y + 3.4, z, 18.5, 6.8, 12.4, 0.18);
-  addBox(group, roof, x, y + 7.15, z, 19.8, 1.1, 13.6, 0.18);
-  const wing = addBox(group, cream, x - 7.4, y + 2.6, z + 1.2, 8.2, 5.2, 8.6, 0.18);
-  wing.rotation.y = 0.18;
-  addBox(group, roof, x - 7.4, y + 5.5, z + 1.2, 8.8, 0.7, 9.2, 0.18);
-  const turret = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 9.2, 12), cream);
-  turret.position.set(x + 7.2, y + 5.1, z + 0.4);
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(3.1, 4.2, 12), roof);
-  cap.position.set(x + 7.2, y + 11.6, z + 0.4);
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(14.5, 0.24, 8.8), wood);
-  deck.position.set(x - 1.2, y + 7.05, z + 9.4);
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(14.5, 1.05, 0.14), trim);
-  rail.position.set(x - 1.2, y + 7.6, z + 13.7);
-  const window = new THREE.Mesh(new THREE.BoxGeometry(12.2, 2.8, 0.14), glass);
-  window.position.set(x - 0.8, y + 4.6, z + 6.3);
-  const northGlass = new THREE.Mesh(new THREE.BoxGeometry(11.6, 2.6, 0.16), glass);
-  northGlass.position.set(x - 0.6, y + 4.5, z + 6.28);
+  addBox(group, cream, x, y + 4.6, z, 22, 9.2, 16, 0.12);
+  addBox(group, roof, x, y + 9.6, z, 23.6, 1.4, 17.4, 0.12);
+  const wing = addBox(group, cream, x - 9.2, y + 3.4, z + 2.2, 10, 6.8, 11, 0.12);
+  wing.rotation.y = 0.16;
+  addBox(group, roof, x - 9.2, y + 7.2, z + 2.2, 10.8, 0.9, 11.8, 0.12);
+  const turret = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.6, 12.4, 12), cream);
+  turret.position.set(x + 8.4, y + 6.6, z + 1.2);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(4.1, 5.6, 12), roof);
+  cap.position.set(x + 8.4, y + 15.4, z + 1.2);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(18, 0.28, 10.5), wood);
+  deck.position.set(x - 1.0, y + 9.35, z + 12.2);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(18, 1.15, 0.16), trim);
+  rail.position.set(x - 1.0, y + 9.95, z + 17.3);
+  const window = new THREE.Mesh(new THREE.BoxGeometry(16.4, 3.4, 0.16), glass);
+  window.position.set(x - 0.6, y + 5.6, z + 8.1);
+  const northGlass = new THREE.Mesh(new THREE.BoxGeometry(15.8, 3.2, 0.18), glass);
+  northGlass.position.set(x - 0.4, y + 5.5, z + 8.08);
   const posts = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6), wood);
   for (const mesh of [turret, cap, deck, rail, window, northGlass]) {
     mesh.userData.noShadow = true;
@@ -172,11 +172,11 @@ function vetruse(group, hero) {
   }
   for (const dx of [-6, -2, 2, 6]) {
     const post = posts.clone();
-    post.position.set(x - 1.2 + dx, y + 8.2, z + 13.6);
+    post.position.set(x - 1.0 + dx, y + 10.6, z + 17.2);
     post.userData.noShadow = true;
     group.add(post);
   }
-  return boxBlocker(x, z, 11, 9.2, y + 8);
+  return boxBlocker(x, z, 13, 12, y + 10);
 }
 
 function forum(group, hero) {
