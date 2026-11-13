@@ -726,6 +726,10 @@ function updateCamera() {
     camera.lookAt(-(player.x + fx * 36), player.y + 1.55 + sin * 8, player.z + fz * 36);
     return;
   }
+  if (shotMode) {
+    camera.lookAt(-(player.x + fx * 18), player.y + 1.4 + sin * 10, player.z + fz * 18);
+    return;
+  }
   const lookY = Math.max(player.y + 1.15, terrain.sample(player.x + fx * 9, player.z + fz * 9) + 1.2);
   camera.lookAt(-(player.x + fx * 9), lookY + sin * 2.2, player.z + fz * 9);
 }
