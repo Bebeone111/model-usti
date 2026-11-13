@@ -1,7 +1,7 @@
 import './style.css';
 import * as THREE from 'three';
 import area from '../area.config.json';
-import { clipPolyline, makeProjector } from './geom.js';
+import { makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
 import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, sinkGround, walkBlocked, walkHeight, wrapBankSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
@@ -1410,40 +1410,7 @@ function loadPublicTexture(url) {
 }
 
 function detailZones(water) {
-  const segments = [];
-  const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
-  const onEdge = (ax, az, bx, bz) => {
-    const near = (value, limit) => Math.abs(value - limit) < 1.4;
-    return (
-      (near(ax, projector.minX) && near(bx, projector.minX))
-      || (near(ax, projector.maxX) && near(bx, projector.maxX))
-      || (near(az, projector.minZ) && near(bz, projector.minZ))
-      || (near(az, projector.maxZ) && near(bz, projector.maxZ))
-    );
-  };
-  for (const feature of water?.features || []) {
-    if (feature.properties?.water !== 'river') continue;
-    const geometry = feature.geometry;
-    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
-    for (const ring of rings) {
-      if (!ring?.length) continue;
-      const local = ring.map(([lon, lat]) => projector.toLocal(lon, lat));
-      for (const part of clipPolyline(local, ...box)) {
-        for (let i = 1; i < part.length; i++) {
-          const a = part[i - 1];
-          const b = part[i];
-          if (onEdge(a[0], a[1], b[0], b[1])) continue;
-          segments.push(a[0], a[1], b[0], b[1]);
-        }
-      }
-    }
-  }
-  const [x0, z0] = projector.toLocal(14.036, 50.6544);
-  const [x1, z1] = projector.toLocal(14.0438, 50.6576);
-  return {
-    segments,
-    slope: { minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) },
-  };
+  return { segments: [], slope: null };
 }
 
 async function boot() {

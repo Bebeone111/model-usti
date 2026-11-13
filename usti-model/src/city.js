@@ -1722,7 +1722,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
     const d = wetDist(x, z);
     let y = pos.getY(i);
     if (d < 12) y = Math.min(y, y0 + 0.18 + d * 0.12);
-    else if (d < 28) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.16);
+    else if (d < 40) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.14);
     pos.setY(i, y);
   }
   const index = geometry.index;
@@ -1750,15 +1750,17 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const nx = uy * vz - uz * vy;
       const nz = ux * vy - uy * vx;
       const len = Math.hypot(nx, ny, nz) || 1;
-      if (ny / len > 0.92) continue;
+      if (ny / len > 0.93) continue;
+      const low = Math.min(ay, by, cy);
+      if (low > y0 + 7.5) continue;
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);
-      const nearWater = inside || shore < 36 || wetDist(mx, mz) < 32;
+      const dWet = wetDist(mx, mz);
+      const nearWater = inside || shore < 48 || dWet < 44 || low < y0 + 3.2;
       if (!nearWater) continue;
-      const low = Math.min(ay, by, cy);
-      const cap = y0 + (inside ? -0.4 : 0.35 + Math.min(Math.min(shore, wetDist(mx, mz)), 24) * 0.08);
-      const next = Math.min(low + 0.2, cap);
+      const cap = y0 + (inside ? -0.4 : 0.28 + Math.min(Math.min(shore, dWet), 22) * 0.09);
+      const next = Math.min(low + 0.18, cap);
       pos.setY(i0, Math.min(ay, next));
       pos.setY(i1, Math.min(by, next));
       pos.setY(i2, Math.min(cy, next));
