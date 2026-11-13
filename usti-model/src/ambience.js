@@ -46,7 +46,7 @@ export function createAmbience() {
     },
     presence(nearWater) {
       if (!enabled || !ctx || !master) return;
-      master.gain.setTargetAtTime(nearWater ? 0.028 : 0.012, ctx.currentTime, 0.25);
+      master.gain.setTargetAtTime(nearWater ? 0.045 : 0.012, ctx.currentTime, 0.25);
     },
     step(moving, fast) {
       if (!enabled || !ctx || !moving) return;

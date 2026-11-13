@@ -1,4 +1,4 @@
-const TOUR_IDS = ['nadrazi', 'forum', 'namesti', 'zdar', 'pavel', 'mariansky', 'vetruse', 'namesti'];
+const TOUR_IDS = ['nadrazi', 'forum', 'namesti', 'benes', 'mariansky', 'vetruse', 'pavel', 'namesti'];
 const VISIT_KEY = 'usti-visited';
 
 function norm(value) {
@@ -17,7 +17,7 @@ function loadVisited() {
   }
 }
 
-export function createPlaces({ pois, labelPoints }) {
+export function createPlaces({ pois, labelPoints, addresses = [] }) {
   const byId = new Map(pois.map((poi) => [poi.id, poi]));
   const visited = loadVisited();
   let tour = null;
@@ -78,6 +78,13 @@ export function createPlaces({ pois, labelPoints }) {
       if (seen.has(key) || !key.includes(q)) continue;
       seen.add(key);
       out.push({ name: point.text, x: point.x, z: point.z, poi: null });
+      if (out.length >= 12) break;
+    }
+    for (const addr of addresses) {
+      const key = norm(addr.name);
+      if (seen.has(key) || !key.includes(q)) continue;
+      seen.add(key);
+      out.push({ name: addr.name, x: addr.x, z: addr.z, poi: null });
       if (out.length >= 12) break;
     }
     return out.slice(0, 12);

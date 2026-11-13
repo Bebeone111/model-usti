@@ -261,6 +261,8 @@ const SMALL = new Set(['garage', 'garages', 'shed', 'roof', 'carport', 'hut', 'c
 export function buildingHeight(tags) {
   const h = parseMeters(tags.height);
   if (h && h > 1.4 && h < 160) return h;
+  const ruian = parseMeters(tags.ruianLevels ?? tags.pocetPodlazi ?? tags.podlazi);
+  if (ruian && ruian > 0 && ruian < 50) return ruian * 3.1;
   const levels = parseMeters(tags['building:levels']);
   if (levels && levels > 0 && levels < 50) return levels * 3;
   if (SMALL.has(tags.building)) return 3.2;

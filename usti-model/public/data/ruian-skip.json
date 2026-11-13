@@ -1,0 +1,5 @@
+{
+  "tried": true,
+  "skipped": true,
+  "reason": "Celá obec Ústí nad Labem ve VFR/GML je moc velká na runtime model; adresy bereme z OSM v bboxu."
+}

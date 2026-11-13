@@ -39,4 +39,14 @@ Viz `public/data/zdroje.md` (adresy, licence, datum, přesný bbox).
 
 ## Co v1 záměrně neumí
 
-Jednoduché výšky (tag `height`, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m) a stejný počet řad oken. Dveře jsou na straně do ulice. Střechy jsou ploché nebo valbové, fasáda není fotografie adresy. Kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.
+Jednoduché výšky (tag `height`, jinak RÚIAN podlaží × 3,1 m když jsou v datech, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m) a stejný počet řad oken. Dveře jsou na straně do ulice. Střechy jsou ploché nebo valbové, fasáda není fotografie adresy. Kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.
+
+## Poznámky k v4 (co se přeskočilo)
+
+- **RÚIAN VFR/GML celé obce** se nestahuje — soubor obce Ústí je moc velký. Adresy do hledání jdou z OSM (`addr:street` + číslo popisné) po `npm run download`. Výšky pořád berou OSM `height`, pak RÚIAN podlaží pokud tag existuje, pak `building:levels`.
+- **Živá ortofota WMTS kolem kamery** se nenačítají za běhu. Zůstávají dvě předgenerované úrovně `ortho.jpg` / `ortho-mobile.jpg` (současné ČÚZK, ne archiv CENIA).
+- **Jemnější DMR 2–3 m/px** se nepřegenerovával; základ je ~8 m, břehy v `terrain-detail.bin` ~4 m. Hladina řek z terénu nekopíruje, je rovina.
+- **Jízdní řády GTFS a živé GPS** DPmÚL nejsou — žádný scraping. Trolejbusy jedou po OSM relacích, na nízké kvalitě se trasy nenačítají.
+- **Fotky z Wikimedia Commons** u karet míst se necachují (aby data nenarostla o desítky MB). Karty mají parafrázi a odkaz na OSM / Wikidata.
+- **Mapillary / Panoramax, GIS města, DTM kraje, Google 3D Tiles, Střekov, ČHMÚ hladina, historické ortofoto** — záměrně ne.
+- Hosting může pořád posílat `x-robots-tag: noindex`; `_headers` nastavuje cache jen pro `/data` a `/assets`.

@@ -3,13 +3,14 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { buildCity, cameraDistance, makeNameSprite, nightGlow, walkBlocked } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, sinkGround, walkBlocked, walkHeight } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
-import { addBridgeMarks, addStreetFurniture, addTrolleys, addVetruseMark } from './furniture.js';
-import { createDaylight, fetchWeather } from './daylight.js';
+import { addStreetFurniture, addTrolleys, addVetruseMark, boxBlocker } from './furniture.js';
+import { addSignatureBridges } from './bridges.js';
+import { createDaylight, fetchAirQuality, fetchWeather } from './daylight.js';
 import { createAmbience } from './ambience.js';
 
 const canvas = document.querySelector('#view');
@@ -95,19 +96,27 @@ const sky = new THREE.Mesh(
       }
     `,
     fragmentShader: `
+      precision highp float;
       varying vec3 vPos;
       uniform vec3 top;
       uniform vec3 horizon;
       uniform float cloud;
       uniform float night;
+      float ign(vec2 p) {
+        return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+      }
       void main() {
-        float h = normalize(vPos).y;
+        vec3 n = normalize(vPos);
+        float h = n.y;
         float t = smoothstep(-0.05, 0.45, h);
         vec3 day = mix(horizon, top, t);
-        float bands = 0.5 + 0.5 * sin(vPos.x * 0.012 + vPos.z * 0.008);
-        day = mix(day, vec3(0.75, 0.78, 0.8), cloud * bands * (1.0 - t));
+        float veil = 0.78 + 0.08 * n.y;
+        vec3 overcast = vec3(0.70, 0.74, 0.78) * veil;
+        day = mix(day, overcast, cloud * (1.0 - t * 0.35));
         vec3 dusk = vec3(0.07, 0.11, 0.2);
-        gl_FragColor = vec4(mix(day, dusk, night), 1.0);
+        vec3 color = mix(day, dusk, night);
+        color += (ign(gl_FragCoord.xy) - 0.5) / 255.0;
+        gl_FragColor = vec4(color, 1.0);
       }
     `,
   }),
@@ -165,6 +174,7 @@ let places = null;
 let overview = null;
 let daylight = null;
 let weather = null;
+let airQuality = null;
 let goalMark = null;
 const ambience = createAmbience();
 let hudAt = 0;
@@ -176,8 +186,13 @@ const api = {
     return { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, lon, lat, camBack, pointerLocked };
   },
   setState(next) {
-    const x = Number.isFinite(next.x) ? next.x : player.x;
-    const z = Number.isFinite(next.z) ? next.z : player.z;
+    let x = Number.isFinite(next.x) ? next.x : player.x;
+    let z = Number.isFinite(next.z) ? next.z : player.z;
+    if (Number.isFinite(next.lon) && Number.isFinite(next.lat)) {
+      const local = projector.toLocal(next.lon, next.lat);
+      x = local[0];
+      z = local[1];
+    }
     placeNear(x, z, next.yaw, next.pitch);
     if (Number.isFinite(next.camBack)) camBack = Math.min(22, Math.max(2.6, next.camBack));
   },
@@ -234,7 +249,10 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     overview?.toggle();
     if (overview?.isOpen()) document.exitPointerLock();
-  } else if (event.code === 'KeyE') openNearbyPoi();
+  } else if (event.code === 'KeyE') {
+    if (overview?.isOpen()) overview.setOpen(false);
+    openNearbyPoi();
+  }
   else if (event.code === 'KeyG') cycleQuality();
   else if (event.code === 'KeyV') setThirdPerson(!thirdPerson);
   else if (event.code === 'KeyH') setClean(!clean);
@@ -414,10 +432,10 @@ function placeNear(x, z, yaw, pitch) {
     nx = x;
     nz = z;
   } else {
-    for (let ring = 1.6; ring <= 36 && nx == null; ring += 1.6) {
-      for (let a = 0; a < 18; a++) {
-        const px = x + Math.cos((a / 18) * Math.PI * 2) * ring;
-        const pz = z + Math.sin((a / 18) * Math.PI * 2) * ring;
+    for (let ring = 1.6; ring <= 72 && nx == null; ring += 1.6) {
+      for (let a = 0; a < 22; a++) {
+        const px = x + Math.cos((a / 22) * Math.PI * 2) * ring;
+        const pz = z + Math.sin((a / 22) * Math.PI * 2) * ring;
         if (!walkBlocked(collision, px, pz, player.radius)) {
           nx = px;
           nz = pz;
@@ -429,7 +447,7 @@ function placeNear(x, z, yaw, pitch) {
   if (nx == null) return false;
   player.x = nx;
   player.z = nz;
-  player.y = terrain.sample(player.x, player.z);
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   if (Number.isFinite(yaw)) player.yaw = yaw;
   if (Number.isFinite(pitch)) player.pitch = Math.max(-1.05, Math.min(0.85, pitch));
   return true;
@@ -441,28 +459,9 @@ function goHome() {
   overview?.centerOnPlayer();
 }
 
-function climbLookout(poi) {
-  let best = null;
-  for (let dx = -36; dx <= 36; dx += 3) {
-    for (let dz = 16; dz <= 62; dz += 3) {
-      const x = poi.x + dx;
-      const z = poi.z + dz;
-      if (!collision || walkBlocked(collision, x, z, player.radius)) continue;
-      let clear = true;
-      for (let step = 3; step <= 15; step += 3) {
-        if (walkBlocked(collision, x, z + step, 0.35)) {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) continue;
-      const h = terrain.sample(x, z);
-      const score = h + dz * 0.2 - Math.abs(dx) * 0.05;
-      if (!best || score > best.score) best = { x, z, score };
-    }
-  }
-  if (best) placeNear(best.x, best.z, Math.PI, -0.32);
-  else placeNear(poi.x, poi.z + 28, Math.PI, -0.32);
+function climbLookout() {
+  const [x, z] = projector.toLocal(14.03980, 50.65540);
+  placeNear(x, z, 3.20, -0.15);
   camBack = 6.2;
   closePoi();
 }
@@ -484,7 +483,7 @@ function tryMove(dx, dz) {
     if (!walkBlocked(collision, nx, player.z, player.radius)) player.x = nx;
     else if (!walkBlocked(collision, player.x, nz, player.radius)) player.z = nz;
   }
-  player.y = terrain.sample(player.x, player.z);
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
 }
 
 function limbBox(width, height, depth, material) {
@@ -494,8 +493,8 @@ function limbBox(width, height, depth, material) {
 function makePerson() {
   const skin = new THREE.MeshLambertMaterial({ color: 0xb98b62 });
   const hair = new THREE.MeshLambertMaterial({ color: 0x2a211c });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x2a4660 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x1b242c });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x1a2836 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x101418 });
   const shoes = new THREE.MeshLambertMaterial({ color: 0x161311 });
   const group = new THREE.Group();
   group.name = 'person';
@@ -645,10 +644,10 @@ function updateCamera() {
       camZ = player.z + (camZ - player.z) * scale;
       camY = player.y + 1.7 + (camY - player.y - 1.7) * scale;
     }
-    person.visible = thirdPerson && keep > 1.55;
-  } else person.visible = thirdPerson;
-  if (!thirdPerson) person.visible = false;
-  let floor = terrain.sample(camX, camZ);
+    person.visible = thirdPerson && keep > 1.55 && !photoMode;
+  } else person.visible = thirdPerson && !photoMode;
+  if (!thirdPerson || photoMode) person.visible = false;
+  let floor = walkHeight(collision, camX, camZ, terrain.sample(camX, camZ));
   for (let i = 1; i <= 5; i++) {
     const t = i / 5;
     floor = Math.max(floor, terrain.sample(player.x + (camX - player.x) * t, player.z + (camZ - player.z) * t));
@@ -741,16 +740,49 @@ function closeMenu() {
   document.querySelector('#menu').hidden = true;
 }
 
+function formatOpeningHours(value) {
+  if (!value || typeof value !== 'string') return '';
+  if (/oh|https?:|<|>|javascript/i.test(value)) return '';
+  if (value.length > 120 || value.length < 3) return '';
+  return value;
+}
+
+function spawnAtPoi(poi) {
+  if (!poi) return false;
+  const lon = Number.isFinite(poi.spawnLon) ? poi.spawnLon : poi.lon;
+  const lat = Number.isFinite(poi.spawnLat) ? poi.spawnLat : poi.lat;
+  const [x, z] = projector.toLocal(lon, lat);
+  const yaw = Number.isFinite(poi.spawnYaw) ? poi.spawnYaw : undefined;
+  const pitch = Number.isFinite(poi.spawnPitch) ? poi.spawnPitch : -0.18;
+  return placeNear(x, z, yaw, pitch);
+}
+
 function openPoi(poi, fromTour = false) {
   if (!poi) return;
+  if (overview?.isOpen()) overview.setOpen(false);
   poiOpen = true;
   document.querySelector('#poi').hidden = false;
   document.querySelector('#poi-name').textContent = poi.name;
   document.querySelector('#poi-text').textContent = poi.text || '';
+  const hours = document.querySelector('#poi-hours');
+  if (hours) {
+    const shown = formatOpeningHours(poi.opening_hours);
+    hours.hidden = !shown;
+    hours.textContent = shown ? `Otevírací doba: ${shown}` : '';
+  }
+  const photo = document.querySelector('#poi-photo');
+  if (photo) {
+    if (poi.photo) {
+      photo.hidden = false;
+      photo.querySelector('img').src = poi.photo;
+      photo.querySelector('figcaption').textContent = poi.photoCredit || '';
+    } else photo.hidden = true;
+  }
   const link = document.querySelector('#poi-link');
-  if (poi.osm) {
+  if (poi.osm || poi.wikidata) {
     link.hidden = false;
-    link.href = poi.osm;
+    link.href = poi.osm || poi.wikidata;
+    link.textContent = poi.osm ? 'Otevřít na mapě OSM' : 'Wikidata';
   } else link.hidden = true;
   document.querySelector('#poi-lookout').hidden = poi.id !== 'vetruse';
   const touring = Boolean(places?.currentStop());
@@ -956,14 +988,17 @@ function addGround(texture, grid, pavingTex) {
         float green = sharp.g - max(sharp.r, sharp.b);
         float pale = smoothstep(0.28, 0.48, luma);
         vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
-        float nearMix = 1.0 - smoothstep(8.0, 46.0, vCamDist);
+        float nearMix = 1.0 - smoothstep(6.0, 38.0, vCamDist);
         float stone = smoothstep(0.18, 0.34, luma) * (1.0 - smoothstep(0.008, 0.04, green));
         vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
+        float grain = fract(sin(dot(vGround, vec2(12.9898, 78.233))) * 43758.5453);
+        vec3 stonesB = texture2D(paveMap, vGround * 0.31 + 0.17).rgb;
+        vec3 mixedStones = mix(stones, stonesB, 0.35 + 0.2 * grain);
         diffuseColor.rgb = mix(photo, settled, nearMix);
-        diffuseColor.rgb = mix(diffuseColor.rgb, mix(stones, settled, 0.22), nearMix * stone * uHasPave * 0.9);`,
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.12), nearMix * stone * uHasPave);`
       );
   };
-  groundMat.customProgramCacheKey = () => 'usti-ground-v3';
+  groundMat.customProgramCacheKey = () => 'usti-ground-v4';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1012,7 +1047,7 @@ function reveal() {
   if (wantTour) {
     places?.startTour();
     const stop = places?.currentStop();
-    if (stop) placeNear(stop.poi.x, stop.poi.z);
+    if (stop) spawnAtPoi(stop.poi);
     wantTour = false;
     intro = 0;
   } else {
@@ -1039,12 +1074,12 @@ document.querySelector('#poi-btn').addEventListener('click', openNearbyPoi);
 document.querySelector('#poi-close').addEventListener('click', closePoi);
 document.querySelector('#poi-lookout').addEventListener('click', () => {
   const poi = places?.pois.find((item) => item.id === 'vetruse');
-  if (poi) climbLookout(poi);
+  if (poi) climbLookout();
 });
 document.querySelector('#poi-next').addEventListener('click', () => {
   const stop = places?.advance();
   closePoi();
-  if (stop) placeNear(stop.poi.x, stop.poi.z);
+  if (stop) spawnAtPoi(stop.poi);
 });
 document.querySelector('#poi-cancel').addEventListener('click', () => {
   places?.cancelTour();
@@ -1057,7 +1092,7 @@ document.querySelector('#home-btn').addEventListener('click', () => {
 document.querySelector('#tour-btn').addEventListener('click', () => {
   places?.startTour();
   const stop = places?.currentStop();
-  if (stop) placeNear(stop.poi.x, stop.poi.z);
+  if (stop) spawnAtPoi(stop.poi);
   closeMenu();
 });
 document.querySelector('#hud-btn').addEventListener('click', () => setClean(!clean));
@@ -1078,10 +1113,17 @@ document.querySelector('#share-btn').addEventListener('click', async () => {
   }
 });
 document.querySelector('#photo-save').addEventListener('click', () => {
+  const hide = person.visible;
+  person.visible = false;
   renderer.render(scene, camera);
+  person.visible = hide;
   const link = document.createElement('a');
   link.href = renderer.domElement.toDataURL('image/png');
-  link.download = 'usti-pohled.png';
+  const here = (places?.whereText(player.x, player.z) || 'centrum').split(' · ')[0];
+  const slug = here.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pohled';
+  const when = timeNow();
+  const stamp = `${when.getHours().toString().padStart(2, '0')}${when.getMinutes().toString().padStart(2, '0')}`;
+  link.download = `usti-${slug}-${stamp}.png`;
   link.click();
 });
 document.querySelector('#view-btn').addEventListener('click', () => setThirdPerson(!thirdPerson));
@@ -1125,7 +1167,7 @@ function updateLampLights(night) {
       return;
     }
     entry.light.position.set(hit.lamp.x, hit.lamp.y + 4.2, hit.lamp.z);
-    entry.light.intensity = 2.4 * strength;
+    entry.light.intensity = 5.2 * strength;
     entry.glow.position.set(hit.lamp.x, hit.lamp.y + 0.2, hit.lamp.z);
     entry.glow.visible = true;
   });
@@ -1175,8 +1217,9 @@ function frame(now) {
     const skyState = daylight.update(player, { when: timeNow(), weather, allowRain: PRESETS[quality].rain });
     nightNow = skyState.night;
     if (playing) {
-      clockEl.textContent = skyState.clock;
-      document.querySelector('#menu-clock').textContent = skyState.clock;
+      const aqi = Number.isFinite(airQuality?.european_aqi) ? ` · AQI ${Math.round(airQuality.european_aqi)}` : '';
+      clockEl.textContent = `${skyState.clock}${aqi}`;
+      document.querySelector('#menu-clock').textContent = clockEl.textContent;
       if (groundMat) groundMat.color.setScalar((1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1));
       if (waterMat) {
         waterMat.opacity = skyState.wet ? 0.86 : 0.72;
@@ -1185,7 +1228,11 @@ function frame(now) {
         waterMat.specular.set(skyState.night > 0.45 ? 0xd5eef6 : 0xb7dbe6);
       }
       if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.4 ? 2.6 : 0.22;
-      nightGlow.value = skyState.night > 0.45 ? 0.9 : 0;
+      nightGlow.value = skyState.night > 0.35 ? 1.35 : 0;
+      if (waterMat?.userData?.shader) {
+        waterMat.userData.shader.uniforms.uTime.value = now * 0.001;
+        waterMat.userData.shader.uniforms.uNight.value = skyState.night;
+      }
     }
   }
   if (playing) updatePoiMarks();
@@ -1261,6 +1308,8 @@ async function boot() {
     ['furniture.geojson', false],
   ];
   if (quality !== 'low') jobs.push(['routes.geojson', false]);
+  jobs.push(['railways.geojson', false]);
+  jobs.push(['addresses.geojson', false]);
   const got = new Map();
   let received = 0;
   const onProgress = (file, amount) => {
@@ -1325,6 +1374,8 @@ async function boot() {
   );
   view.add(city.group);
   collision = city.collision;
+  const ground = view.getObjectByName('ground');
+  if (ground?.geometry) sinkGround(ground.geometry, city.basins);
   labels = city.labels;
   const poiNames = new Set((loaded.pois?.features || []).map((poi) => poi.name));
   for (const sprite of labels) {
@@ -1334,14 +1385,14 @@ async function boot() {
   api.trees = city.trees;
   player.x = city.start.x;
   player.z = city.start.z;
-  player.y = terrain.sample(player.x, player.z);
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   player.yaw = city.start.yaw;
   const aheadX = player.x - Math.sin(player.yaw) * 7;
   const aheadZ = player.z - Math.cos(player.yaw) * 7;
   if (!walkBlocked(collision, aheadX, aheadZ, player.radius)) {
     player.x = aheadX;
     player.z = aheadZ;
-    player.y = terrain.sample(player.x, player.z);
+    player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   }
   api.start = city.start;
   const pois = (loaded.pois?.features || []).map((poi) => {
@@ -1388,8 +1439,29 @@ async function boot() {
   view.add(goalMark);
   furniture = addStreetFurniture(view, loaded.furniture, projector, terrain.sample.bind(terrain));
   lampMat = furniture.lampMat;
-  addBridgeMarks(view, loaded.highways, projector, terrain.sample.bind(terrain));
-  addVetruseMark(view, projector, terrain.sample.bind(terrain));
+  const bridges = addSignatureBridges(view, {
+    highways: loaded.highways,
+    railways: loaded.railways,
+    projector,
+    sample: terrain.sample.bind(terrain),
+    waterY: city.waterY ?? 0.9,
+    detail: true,
+  });
+  collision.decks = bridges.decks;
+  collision.rails = bridges.rails;
+  const vetruseHit = addVetruseMark(view, projector, terrain.sample.bind(terrain));
+  if (vetruseHit) addBlocker(collision, vetruseHit);
+  addBlocker(collision, boxBlocker(...projector.toLocal(14.03658, 50.66229), 6.2, 5.4));
+  addBlocker(collision, boxBlocker(...projector.toLocal(14.042236, 50.659081), 6.8, 5.6));
+  for (const stop of furniture.stops || []) {
+    if (!stop.name) continue;
+    const sprite = makeNameSprite(stop.name);
+    sprite.userData.kind = 'stop';
+    sprite.position.set(stop.x, stop.y + 4.2, stop.z);
+    view.add(sprite);
+    labels.push(sprite);
+    city.labelPoints.push({ text: stop.name, x: stop.x, z: stop.z, y: stop.y + 4.2, kind: 'stop' });
+  }
   trolleys = quality === 'low' ? null : addTrolleys(view, loaded.routes, projector, terrain.sample.bind(terrain));
   const glowMat = new THREE.MeshBasicMaterial({
     color: 0xffb15a,
@@ -1399,7 +1471,7 @@ async function boot() {
     blending: THREE.AdditiveBlending,
   });
   lampLights = Array.from({ length: 8 }, () => {
-    const light = new THREE.PointLight(0xffb15a, 0, 36, 1);
+    const light = new THREE.PointLight(0xffc178, 0, 46, 1);
     light.castShadow = false;
     const glow = new THREE.Mesh(new THREE.CircleGeometry(2.4, 16), glowMat);
     glow.rotation.x = -Math.PI / 2;
@@ -1408,13 +1480,26 @@ async function boot() {
     return { light, glow, glowMat };
   });
   waterPoints = collectWater(loaded.water, projector);
-  places = createPlaces({ pois, labelPoints: city.labelPoints });
+  const addressRows = Array.isArray(loaded.addresses)
+    ? loaded.addresses
+    : loaded.addresses?.features?.map((feature) => ({
+        name: feature.properties?.name || feature.name,
+        lon: feature.lon ?? feature.geometry?.coordinates?.[0],
+        lat: feature.lat ?? feature.geometry?.coordinates?.[1],
+      })) || [];
+  const addresses = addressRows
+    .filter((item) => item?.name && Number.isFinite(item.lon) && Number.isFinite(item.lat))
+    .map((item) => {
+      const [x, z] = projector.toLocal(item.lon, item.lat);
+      return { ...item, x, z };
+    });
+  places = createPlaces({ pois, labelPoints: city.labelPoints, addresses });
   const bounds = { minX: projector.minX, maxX: projector.maxX, minZ: projector.minZ, maxZ: projector.maxZ };
   overview = createOverview({
     mini: document.querySelector('#mini'),
     canvas: document.querySelector('#map-canvas'),
     panel: document.querySelector('#map'),
-    geometry: collectMapGeometry(loaded.highways, loaded.water, projector),
+    geometry: collectMapGeometry(loaded.highways, loaded.water, projector, loaded.railways),
     bounds,
     getPlayer: () => ({ x: player.x, z: player.z, yaw: player.yaw }),
     getWhere: () => places.whereText(player.x, player.z),
@@ -1422,12 +1507,13 @@ async function boot() {
     getLabels: () => city.labelPoints,
     getGoal: () => places.currentStop()?.poi || null,
     search: (query) => places.search(query),
-    onTeleport: (x, z) => {
-      placeNear(x, z);
+    onTeleport: (x, z, poi) => {
+      if (poi) spawnAtPoi(poi);
+      else placeNear(x, z);
       overview.drawMap();
     },
     onPoi: (poi) => {
-      placeNear(poi.x, poi.z);
+      spawnAtPoi(poi);
       overview.setOpen(false);
       openPoi(poi);
     },
@@ -1435,16 +1521,19 @@ async function boot() {
     onTour: () => {
       places.startTour();
       const stop = places.currentStop();
-      if (stop) placeNear(stop.poi.x, stop.poi.z);
+      if (stop) spawnAtPoi(stop.poi);
       overview.setOpen(false);
     },
   });
   daylight = createDaylight({ hemi, sun, sky, fog: scene.fog, scene, camera });
-  const hashed = readHash();
-  if (hashed) {
+  const applyHash = () => {
+    const hashed = readHash();
+    if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    placeNear(x, z, hashed[2], hashed[3]);
-  }
+    return placeNear(x, z, hashed[2], hashed[3]);
+  };
+  applyHash();
+  window.addEventListener('hashchange', applyHash);
   applyQuality(quality);
   api.labels = city.labelPoints;
   api.ready = true;
@@ -1461,6 +1550,13 @@ async function boot() {
     })
     .catch(() => {
       weather = null;
+    });
+  fetchAirQuality()
+    .then((air) => {
+      airQuality = air;
+    })
+    .catch(() => {
+      airQuality = null;
     });
 }
 

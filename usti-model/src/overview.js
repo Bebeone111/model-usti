@@ -10,7 +10,7 @@ function roadStyle(key) {
   return null;
 }
 
-export function collectMapGeometry(highways, water, projector) {
+export function collectMapGeometry(highways, water, projector, railways = null) {
   const lines = [];
   for (const feature of highways?.features || []) {
     if (feature.geometry?.type !== 'LineString') continue;
@@ -23,6 +23,16 @@ export function collectMapGeometry(highways, water, projector) {
       if (!last || Math.hypot(x - last[0], z - last[1]) > 8) pts.push([x, z]);
     }
     if (pts.length >= 2) lines.push({ pts, ...style });
+  }
+  for (const feature of railways?.features || []) {
+    if (feature.geometry?.type !== 'LineString') continue;
+    const pts = [];
+    for (const [lon, lat] of feature.geometry.coordinates) {
+      const [x, z] = projector.toLocal(lon, lat);
+      const last = pts[pts.length - 1];
+      if (!last || Math.hypot(x - last[0], z - last[1]) > 10) pts.push([x, z]);
+    }
+    if (pts.length >= 2) lines.push({ pts, color: '#6a6460', width: 1.8 });
   }
   const rivers = [];
   const pushRing = (ring) => {
@@ -225,7 +235,6 @@ export function createOverview({ mini, canvas, panel, geometry, bounds, getPlaye
       view.x = player.x;
       view.z = player.z;
       drawMap();
-      setTimeout(() => searchInput?.focus(), 30);
     }
   }
 
@@ -291,7 +300,7 @@ export function createOverview({ mini, canvas, panel, geometry, bounds, getPlaye
       const li = document.createElement('li');
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = item.name;
+      button.textContent = `${item.name} · jít sem`;
       button.addEventListener('click', () => {
         onTeleport(item.x, item.z, item.poi);
         results.innerHTML = '';

@@ -26,7 +26,9 @@
     "water": 8,
     "trees": 17,
     "furniture": 383,
-    "routes": 1992
+    "routes": 1992,
+    "railways": 247,
+    "addresses": 1442
   },
   "skipped": {
     "buildings": 0,
@@ -35,7 +37,9 @@
     "water": 1,
     "trees": 0,
     "furniture": 0,
-    "routes": 0
+    "routes": 0,
+    "railways": 0,
+    "addresses": 0
   },
   "ortho": {
     "file": "ortho.jpg",
@@ -70,5 +74,9 @@
     "osm": "Open Database License (ODbL) 1.0",
     "ortofoto": "Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK",
     "dmr5g": "Creative Commons Attribution 4.0 (CC BY 4.0), zdroj ČÚZK, DMR 5G"
+  },
+  "themeTimestamps": {
+    "railways": "2026-11-12T20:09:21Z",
+    "addresses": "2026-11-12T20:09:21Z"
   }
 }
