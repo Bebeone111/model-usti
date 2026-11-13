@@ -1000,6 +1000,7 @@ function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift, cap = Infin
 function addShores(group, rings, sample, box, waterY = 0.9) {
   const gravel = [];
   const wet = [];
+  const quay = [];
   for (const ring of rings) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i];
@@ -1017,21 +1018,21 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const az = a[1] + dz * t0;
         const bx = a[0] + dx * t1;
         const bz = a[1] + dz * t1;
-        const ox = (dz / len) * 8.5;
-        const oz = (-dx / len) * 8.5;
-        const cap = waterY + 1.85;
-        pushRibbon(gravel, ax, az, bx, bz, ox, oz, (x, z) => Math.min(sample(x, z), waterY + 1.6 + Math.hypot(x - ax, z - az) * 0.08), 0.08, cap);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.4, (-dx / len) * 2.4, () => waterY, 0.04, waterY + 0.12);
+        const inward = (dz / len) * 5.2;
+        const inwZ = (-dx / len) * 5.2;
+        pushRibbon(gravel, ax, az, bx, bz, inward, inwZ, () => waterY + 1.15, 0, waterY + 1.2);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.8, (-dx / len) * 1.8, () => waterY, 0.04, waterY + 0.1);
+        const yb = waterY - 0.2;
+        const yt = waterY + 1.25;
+        quay.push(ax, yb, az, bx, yb, bz, bx, yt, bz, ax, yb, az, bx, yt, bz, ax, yt, az);
       }
     }
   }
   const make = (positions, color, factor) => {
     if (positions.length < 9) return;
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geometry.computeVertexNormals();
     group.add(
       new THREE.Mesh(
         geometry,
@@ -1047,6 +1048,7 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
   };
   make(gravel, 0xc6b59a, -2);
   make(wet, 0x5e6d66, -3);
+  make(quay, 0x8a8580, -1);
 }
 
 export async function buildCity(data, projector, hooks = {}) {
@@ -1619,12 +1621,13 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     const d = distToRing(x, z, basin.outer.concat([basin.outer[0]]));
     if (d < shore) shore = d;
   }
-  if (inside) return Math.min(rawY, riverY - 0.85);
-  if (shore < 12) {
-    const t = shore < 4 ? 1 : 1 - (shore - 4) / 8;
-    const target = riverY + 0.12 + shore * 0.09;
-    const blended = rawY * (1 - t * 0.92) + target * (t * 0.92);
-    return Math.min(blended, riverY + 1.9 + shore * 0.12);
+  if (inside) return Math.min(rawY, riverY - 0.9);
+  if (shore < 36) {
+    const t = 1 - shore / 36;
+    const target = riverY + 0.08 + shore * 0.085;
+    const cap = riverY + 0.28 + shore * 0.09;
+    const blended = rawY * (1 - t * 0.98) + target * (t * 0.98);
+    return Math.min(blended, cap);
   }
   return rawY;
 }
@@ -1633,14 +1636,81 @@ export function wrapBankSample(sample, basins, riverY) {
   return (x, z) => bankHeight(sample(x, z), x, z, basins, riverY);
 }
 
-export function sinkGround(geometry, basins, riverY) {
+function shoreDist(x, z, basins, riverY) {
+  let inside = false;
+  let shore = Infinity;
+  for (const basin of basins || []) {
+    if (!basin.river && Math.abs(basin.y - riverY) > 0.2) continue;
+    const hit = pointInRing(x, z, basin.outer);
+    let hole = false;
+    for (const ring of basin.holes || []) {
+      if (pointInRing(x, z, ring)) hole = true;
+    }
+    if (hit && !hole) inside = true;
+    const d = distToRing(x, z, basin.outer.concat([basin.outer[0]]));
+    if (d < shore) shore = d;
+  }
+  return { inside, shore };
+}
+
+export function sinkGround(geometry, basins, riverY, decks = []) {
   if (!geometry?.attributes?.position || !basins?.length) return;
   const pos = geometry.attributes.position;
   const y0 = riverY ?? Math.min(...basins.map((b) => b.y));
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    pos.setY(i, bankHeight(pos.getY(i), x, z, basins, y0));
+    let y = bankHeight(pos.getY(i), x, z, basins, y0);
+    const { inside, shore } = shoreDist(x, z, basins, y0);
+    for (const deck of decks) {
+      if (!deck.walk) continue;
+      if (x < deck.minX - 18 || x > deck.maxX + 18 || z < deck.minZ - 18 || z > deck.maxZ + 18) continue;
+      const on = pointInRing(x, z, deck.outer);
+      const edge = distToRing(x, z, deck.outer);
+      if (on || edge < 16) {
+        if (inside || shore < 22) y = Math.min(y, y0 - 0.55);
+        else y = Math.min(y, deck.y - 0.55);
+      }
+    }
+    pos.setY(i, y);
+  }
+  const index = geometry.index;
+  if (index) {
+    for (let t = 0; t < index.count; t += 3) {
+      const i0 = index.getX(t);
+      const i1 = index.getX(t + 1);
+      const i2 = index.getX(t + 2);
+      const ax = pos.getX(i0);
+      const ay = pos.getY(i0);
+      const az = pos.getZ(i0);
+      const bx = pos.getX(i1);
+      const by = pos.getY(i1);
+      const bz = pos.getZ(i1);
+      const cx = pos.getX(i2);
+      const cy = pos.getY(i2);
+      const cz = pos.getZ(i2);
+      const ux = bx - ax;
+      const uy = by - ay;
+      const uz = bz - az;
+      const vx = cx - ax;
+      const vy = cy - ay;
+      const vz = cz - az;
+      const ny = uz * vx - ux * vz;
+      const nx = uy * vz - uz * vy;
+      const nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      if (ny / len > 0.42) continue;
+      const mx = (ax + bx + cx) / 3;
+      const mz = (az + bz + cz) / 3;
+      const { inside, shore } = shoreDist(mx, mz, basins, y0);
+      if (!inside && shore > 36) continue;
+      const low = Math.min(ay, by, cy);
+      const cap = y0 + (inside ? -0.4 : 0.55 + Math.min(shore, 20) * 0.06);
+      const next = Math.min(low + 0.35, cap);
+      pos.setY(i0, Math.min(ay, next));
+      pos.setY(i1, Math.min(by, next));
+      pos.setY(i2, Math.min(cy, next));
+    }
   }
   pos.needsUpdate = true;
   geometry.computeVertexNormals();

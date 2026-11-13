@@ -61,7 +61,8 @@ function church(group, hero, opts) {
   const band = new THREE.Mesh(new THREE.BoxGeometry(opts.towerW * 1.08, 0.4, opts.towerW * 1.08), stone);
   band.position.y = shaftH * 0.72;
   tower.add(shaft, cap, band);
-  tower.position.set(tx, y, tz);
+  tower.position.set(tx, y, opts.lean ? tz + 5.5 : tz);
+  tower.rotation.order = 'XYZ';
   tower.rotation.x = opts.lean || 0;
   tower.userData.noShadow = true;
   group.add(tower);
@@ -92,10 +93,10 @@ function cathedral(group, hero) {
     naveL: 28,
     naveH: 11.5,
     roofH: 5.4,
-    towerH: 27.5,
-    towerW: 5.6,
-    spire: 9.2,
-    lean: -0.087,
+    towerH: 34,
+    towerW: 6.2,
+    spire: 11.5,
+    lean: -0.18,
     buttress: true,
   });
 }
@@ -136,27 +137,46 @@ function vojtech(group, hero) {
 
 function vetruse(group, hero) {
   const { x, z, y } = hero;
-  const cream = new THREE.MeshLambertMaterial({ color: 0xefe4d2 });
-  const roof = new THREE.MeshLambertMaterial({ color: 0x7a3c32 });
+  const cream = new THREE.MeshLambertMaterial({ color: 0xf2e6d2 });
+  const roof = new THREE.MeshLambertMaterial({ color: 0x8a3228 });
   const wood = new THREE.MeshLambertMaterial({ color: 0x6e5438 });
-  const glass = new THREE.MeshLambertMaterial({ color: 0x7aa0b4, transparent: true, opacity: 0.55 });
-  addBox(group, cream, x, y + 3.1, z, 16.4, 6.2, 11.2, 0.2);
-  addBox(group, roof, x, y + 6.55, z, 17.4, 0.7, 12.2, 0.2);
-  const turret = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.3, 7.4, 10), cream);
-  turret.position.set(x + 6.4, y + 4.1, z - 1.2);
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(2.4, 3.4, 10), roof);
-  cap.position.set(x + 6.4, y + 9.3, z - 1.2);
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.22, 7.4), wood);
-  deck.position.set(x - 2.2, y + 6.85, z + 7.6);
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.9, 0.12), wood);
-  rail.position.set(x - 2.2, y + 7.35, z + 11.2);
-  const window = new THREE.Mesh(new THREE.BoxGeometry(8.8, 2.4, 0.12), glass);
-  window.position.set(x - 1.4, y + 4.4, z + 5.7);
-  for (const mesh of [turret, cap, deck, rail, window]) {
+  const glass = new THREE.MeshLambertMaterial({
+    color: 0x6a90a8,
+    emissive: 0x243848,
+    emissiveIntensity: 0.12,
+    transparent: true,
+    opacity: 0.7,
+  });
+  const trim = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 });
+  addBox(group, cream, x, y + 3.4, z, 18.5, 6.8, 12.4, 0.18);
+  addBox(group, roof, x, y + 7.15, z, 19.8, 1.1, 13.6, 0.18);
+  const wing = addBox(group, cream, x - 7.4, y + 2.6, z + 1.2, 8.2, 5.2, 8.6, 0.18);
+  wing.rotation.y = 0.18;
+  addBox(group, roof, x - 7.4, y + 5.5, z + 1.2, 8.8, 0.7, 9.2, 0.18);
+  const turret = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 9.2, 12), cream);
+  turret.position.set(x + 7.2, y + 5.1, z + 0.4);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(3.1, 4.2, 12), roof);
+  cap.position.set(x + 7.2, y + 11.6, z + 0.4);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(14.5, 0.24, 8.8), wood);
+  deck.position.set(x - 1.2, y + 7.05, z + 9.4);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(14.5, 1.05, 0.14), trim);
+  rail.position.set(x - 1.2, y + 7.6, z + 13.7);
+  const window = new THREE.Mesh(new THREE.BoxGeometry(12.2, 2.8, 0.14), glass);
+  window.position.set(x - 0.8, y + 4.6, z + 6.3);
+  const northGlass = new THREE.Mesh(new THREE.BoxGeometry(11.6, 2.6, 0.16), glass);
+  northGlass.position.set(x - 0.6, y + 4.5, z + 6.28);
+  const posts = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6), wood);
+  for (const mesh of [turret, cap, deck, rail, window, northGlass]) {
     mesh.userData.noShadow = true;
     group.add(mesh);
   }
-  return boxBlocker(x, z, 9.2, 7.4, y + 7);
+  for (const dx of [-6, -2, 2, 6]) {
+    const post = posts.clone();
+    post.position.set(x - 1.2 + dx, y + 8.2, z + 13.6);
+    post.userData.noShadow = true;
+    group.add(post);
+  }
+  return boxBlocker(x, z, 11, 9.2, y + 8);
 }
 
 function forum(group, hero) {

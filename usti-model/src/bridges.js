@@ -398,25 +398,26 @@ function buildMarian(pts, waterY, sample, detail) {
   const baseY = deckY - 3.2;
   const pylons = [];
   for (const side of [-1, 1]) {
-    const x = abut.x + abut.nx * 7.2 * side + abut.tx * ontoBank * 10;
-    const z = abut.z + abut.nz * 7.2 * side + abut.tz * ontoBank * 10;
+    const x = abut.x + abut.nx * 10.4 * side + abut.tx * ontoBank * 16;
+    const z = abut.z + abut.nz * 10.4 * side + abut.tz * ontoBank * 16;
     const yaw = Math.atan2(abut.tx, abut.tz);
-    const shaft = new THREE.BoxGeometry(4.2, h, 6.4);
+    const lean = intoSpan * 0.045;
+    const shaft = new THREE.BoxGeometry(3.6, h, 5.4);
     shaft.translate(0, h / 2, 0);
-    shaft.rotateX(intoSpan * 0.11);
+    shaft.rotateX(lean);
     shaft.rotateY(yaw);
     shaft.translate(x, baseY, z);
     pylonGeos.push(shaft);
-    const cap = new THREE.BoxGeometry(5.2, 2.4, 7.2);
-    cap.translate(0, h + 0.6, 0);
-    cap.rotateX(intoSpan * 0.11);
+    const cap = new THREE.BoxGeometry(4.6, 2.2, 6.2);
+    cap.translate(0, h + 0.5, 0);
+    cap.rotateX(lean);
     cap.rotateY(yaw);
     cap.translate(x, baseY, z);
     pylonGeos.push(cap);
     const top = new THREE.Vector3(
-      x + abut.tx * intoSpan * 8.2,
-      baseY + h * 0.97,
-      z + abut.tz * intoSpan * 8.2,
+      x + abut.tx * intoSpan * 3.4,
+      baseY + h * 0.98,
+      z + abut.tz * intoSpan * 3.4,
     );
     pylons.push({ x, z, y: baseY, top, side });
   }
