@@ -139,9 +139,13 @@ function wallStrip(ring, groundAt, base, top, floors = 3) {
       const seg = len / pieces;
       const y0 = groundAt(ax, az) + base;
       const y1 = groundAt(bx, bz) + base;
+      const y0s = y0 - 2.6;
+      const y1s = y1 - 2.6;
       positions.push(ax, y0, az, bx, y1, bz, bx, y1 + span, bz, ax, y0, az, bx, y1 + span, bz, ax, y0 + span, az);
-      for (let k = 0; k < 6; k++) normals.push(nx, 0, nz);
+      positions.push(ax, y0s, az, bx, y1s, bz, bx, y1, bz, ax, y0s, az, bx, y1, bz, ax, y0, az);
+      for (let k = 0; k < 12; k++) normals.push(nx, 0, nz);
       uvs.push(acc, 0, acc + seg, 0, acc + seg, rows, acc, 0, acc + seg, rows, acc, rows);
+      uvs.push(acc, 0, acc + seg, 0, acc + seg, 0.04, acc, 0, acc + seg, 0.04, acc, 0.04);
       acc += seg;
     }
   }
@@ -727,7 +731,7 @@ function streetEdge(ring, roads) {
   return best ? best.index : longestIndex;
 }
 
-function drapeFlat(flat, sample, lift, parts) {
+function drapeFlat(flat, sample, lift, parts, blocked) {
   const positions = [];
   const normals = [];
   for (let i = 0; i < flat.length; i += 6) {
@@ -737,6 +741,9 @@ function drapeFlat(flat, sample, lift, parts) {
       const z = flat[i + k * 2 + 1];
       tri.push([x, sample(x, z) + lift, z]);
     }
+    const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
+    const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
+    if (blocked?.(mx, mz)) continue;
     let [a, b, c] = tri;
     const abx = b[0] - a[0];
     const abz = b[2] - a[2];
@@ -1074,6 +1081,7 @@ export async function buildCity(data, projector, hooks = {}) {
   };
   const styledParts = Object.fromEntries(Object.keys(FACADE).map((name) => [name, { walls: [], roofs: [] }]));
   const doorParts = [];
+  const floorParts = [];
   const walkParts = [];
   const asphaltParts = [];
   const waterParts = [];
@@ -1171,6 +1179,12 @@ export async function buildCity(data, projector, hooks = {}) {
           roofTarget.push(geometryFromParts([roof]));
         }
       }
+      const floor = triangulate(outer, holes, 0, 1);
+      if (floor) {
+        const p = floor.positions;
+        for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + base + 0.05;
+        floorParts.push(floor);
+      }
       const walls = geometryFromParts(strips);
       if (walls) {
         if (styleName) styledParts[styleName].walls.push(walls);
@@ -1214,8 +1228,19 @@ export async function buildCity(data, projector, hooks = {}) {
     }
   }
 
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
-  drapeFlat(roads.walk, sample, 0.14, walkParts);
+  const roadBlocked = (x, z) =>
+    blockers.some(
+      (block) =>
+        block.blocksWalk
+        && block.kind !== 'water'
+        && x >= block.minX
+        && x <= block.maxX
+        && z >= block.minZ
+        && z <= block.maxZ
+        && pointInRing(x, z, block.outer),
+    );
+  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked);
+  drapeFlat(roads.walk, sample, 0.14, walkParts, roadBlocked);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1374,6 +1399,15 @@ export async function buildCity(data, projector, hooks = {}) {
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
+  }
+  const floors = geometryFromParts(floorParts);
+  if (floors) {
+    const floorMesh = new THREE.Mesh(
+      floors,
+      new THREE.MeshLambertMaterial({ color: 0x8d8880, side: THREE.DoubleSide }),
+    );
+    floorMesh.name = 'floors';
+    group.add(floorMesh);
   }
 
   const parks = geometryFromParts(parkParts);
@@ -1603,23 +1637,8 @@ export function walkHeight(collision, x, z, ground) {
   return deck ? Math.max(ground, deck.y) : ground;
 }
 
-export function sinkGround(geometry, basins) {
-  if (!geometry?.attributes?.position || !basins?.length) return;
-  const pos = geometry.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    for (const basin of basins) {
-      if (!pointInRing(x, z, basin.outer)) continue;
-      let hole = false;
-      for (const ring of basin.holes) {
-        if (pointInRing(x, z, ring)) hole = true;
-      }
-      if (!hole) pos.setY(i, Math.min(pos.getY(i), basin.y - 1.2));
-    }
-  }
-  pos.needsUpdate = true;
-  geometry.computeVertexNormals();
+export function sinkGround() {
+  // Keep the ortho mesh on the DMR. Water is a separate flat plane.
 }
 
 function segIntersect(x1, z1, x2, z2, x3, z3, x4, z4) {
