@@ -1722,7 +1722,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
     const d = wetDist(x, z);
     let y = pos.getY(i);
     if (d < 12) y = Math.min(y, y0 + 0.18 + d * 0.12);
-    else if (d < 40) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.14);
+    else if (d < 50) y = Math.min(y, y0 + 1.62 + (d - 12) * 0.05);
     pos.setY(i, y);
   }
   const index = geometry.index;
@@ -1752,7 +1752,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const len = Math.hypot(nx, ny, nz) || 1;
       if (ny / len > 0.93) continue;
       const low = Math.min(ay, by, cy);
-      if (low > y0 + 7.5) continue;
+      if (low > y0 + 14) continue;
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);

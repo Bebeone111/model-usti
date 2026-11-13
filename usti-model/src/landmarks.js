@@ -220,6 +220,24 @@ function vetruse(group, hero) {
   const risZ = z + Math.sin(yaw) * 10.2;
   addBox(group, plaster, risX, y + 8.4, risZ, 7.2, 16.8, 7.2, yaw);
   addGableRoof(group, roof, risX, y + 16.8, risZ, 8.2, 5.4, 8.2, yaw + Math.PI / 2);
+  const pane = new THREE.MeshLambertMaterial({ color: 0x5c6570, emissive: 0x3a2410, emissiveIntensity: 0.12 });
+  for (const side of [-1, 1]) {
+    for (let col = -4; col <= 4; col++) {
+      for (const row of [3.2, 6.4, 9.4]) {
+        addBox(
+          group,
+          pane,
+          x + Math.cos(yaw) * col * 2.6 + Math.sin(yaw) * 8.05 * side,
+          y + row,
+          z + Math.sin(yaw) * col * 2.6 + Math.cos(yaw) * 8.05 * side,
+          1.5,
+          1.7,
+          0.12,
+          yaw,
+        );
+      }
+    }
+  }
   const tx = x + 9.4;
   const tz = z + 1.4;
   addBox(group, wood, tx, y + 4.55, tz, 12.2, 0.22, 8.8, yaw);
