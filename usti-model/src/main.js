@@ -1496,7 +1496,9 @@ async function boot() {
   const ground = view.getObjectByName('ground');
   if (ground?.geometry) sinkGround(ground.geometry, city.basins, city.waterY, []);
   const parks = city.group.getObjectByName('parks');
+  const asphalt = city.group.getObjectByName('asphalt');
   if (parks?.geometry) sinkGround(parks.geometry, city.basins, city.waterY, []);
+  if (asphalt?.geometry) sinkGround(asphalt.geometry, city.basins, city.waterY, []);
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
   labels = city.labels;
@@ -1576,6 +1578,7 @@ async function boot() {
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   if (ground?.geometry) sinkGround(ground.geometry, city.basins, city.waterY, bridges.decks);
   if (parks?.geometry) sinkGround(parks.geometry, city.basins, city.waterY, bridges.decks);
+  if (asphalt?.geometry) sinkGround(asphalt.geometry, city.basins, city.waterY, bridges.decks);
   cable = addCableCar(view, {
     aerialways: loaded.aerialways,
     projector,

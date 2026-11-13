@@ -1230,8 +1230,6 @@ export async function buildCity(data, projector, hooks = {}) {
     }
   }
 
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts);
-  drapeFlat(roads.walk, sample, 0.14, walkParts);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1269,6 +1267,8 @@ export async function buildCity(data, projector, hooks = {}) {
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
   const banked = wrapBankSample(sample, basins, riverY);
+  drapeFlat(roads.asphalt, banked, 0.28, asphaltParts);
+  drapeFlat(roads.walk, banked, 0.14, walkParts);
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1419,7 +1419,9 @@ export async function buildCity(data, projector, hooks = {}) {
   }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    group.add(new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap)));
+    const asphaltMesh = new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap));
+    asphaltMesh.name = 'asphalt';
+    group.add(asphaltMesh);
   }
   const waterMesh = geometryFromParts(waterParts);
   let waterMaterial = null;
@@ -1683,6 +1685,16 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
     }
     list.push(x, z);
   };
+  for (const basin of basins) {
+    const ring = basin.outer;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const n = Math.max(1, Math.ceil(len / 5));
+      for (let s = 0; s <= n; s++) markWet(a[0] + ((b[0] - a[0]) * s) / n, a[1] + ((b[1] - a[1]) * s) / n);
+    }
+  }
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
