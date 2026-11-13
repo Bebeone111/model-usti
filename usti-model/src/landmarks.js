@@ -93,10 +93,10 @@ function cathedral(group, hero) {
     naveL: 28,
     naveH: 11.5,
     roofH: 5.4,
-    towerH: 34,
-    towerW: 6.2,
-    spire: 11.5,
-    lean: -0.18,
+    towerH: 48,
+    towerW: 7.2,
+    spire: 14,
+    lean: -0.22,
     buttress: true,
   });
 }
@@ -136,7 +136,9 @@ function vojtech(group, hero) {
 }
 
 function vetruse(group, hero) {
-  const { x, z, y } = hero;
+  const x = hero.x;
+  const z = hero.z + 10;
+  const y = hero.y;
   const cream = new THREE.MeshLambertMaterial({ color: 0xf2e6d2 });
   const roof = new THREE.MeshLambertMaterial({ color: 0x8a3228 });
   const wood = new THREE.MeshLambertMaterial({ color: 0x6e5438 });

@@ -500,8 +500,16 @@ function faceMarianDeck() {
   player.x = snap.cx;
   player.z = snap.cz;
   player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
-  player.yaw = yawAlongDeck(snap.deck, true);
-  player.pitch = -0.08;
+  let north = null;
+  for (const p of snap.deck.outer || []) {
+    if (!north || p[1] > north[1]) north = p;
+  }
+  if (north) {
+    player.yaw = Math.atan2(-(north[0] - player.x), -(north[1] - player.z));
+  } else {
+    player.yaw = yawAlongDeck(snap.deck, true);
+  }
+  player.pitch = -0.12;
 }
 
 function goHome() {

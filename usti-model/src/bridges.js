@@ -396,13 +396,12 @@ function buildMarian(pts, waterY, sample, detail) {
   const tPylon = northEndT(pts);
   const abut = pathAt(pts, tPylon);
   const intoSpan = tPylon < 0.5 ? 1 : -1;
-  const ontoBank = -intoSpan;
   const h = 74;
   const baseY = deckY - 3.2;
   const pylons = [];
   for (const side of [-1, 1]) {
-    const x = abut.x + abut.nx * 10.4 * side + abut.tx * ontoBank * 16;
-    const z = abut.z + abut.nz * 10.4 * side + abut.tz * ontoBank * 16;
+    const x = abut.x + abut.nx * 9.6 * side + abut.tx * intoSpan * 14;
+    const z = abut.z + abut.nz * 9.6 * side + abut.tz * intoSpan * 14;
     const yaw = Math.atan2(abut.tx, abut.tz);
     const lean = intoSpan * 0.045;
     const shaft = new THREE.BoxGeometry(3.6, h, 5.4);

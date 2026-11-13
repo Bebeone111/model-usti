@@ -1622,11 +1622,11 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     if (d < shore) shore = d;
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
-  if (shore < 42) {
-    const t = 1 - shore / 42;
-    const target = riverY + 1.12 + shore * 0.05;
-    const cap = riverY + 1.25 + shore * 0.07;
-    const blended = rawY * (1 - t * 0.98) + target * (t * 0.98);
+  if (shore < 72) {
+    const t = 1 - shore / 72;
+    const target = riverY + 1.12 + shore * 0.12;
+    const cap = riverY + 1.3 + shore * 0.16;
+    const blended = rawY * (1 - t * 0.92) + target * (t * 0.92);
     return Math.min(blended, cap);
   }
   return rawY;
