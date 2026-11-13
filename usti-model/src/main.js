@@ -1035,6 +1035,8 @@ function addGround(texture, grid, pavingTex) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('aNy', new THREE.Float32BufferAttribute(new Float32Array(positions.length / 3).fill(1), 1));
+  geometry.setAttribute('aShore', new THREE.Float32BufferAttribute(new Float32Array(positions.length / 3).fill(80), 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const normals = geometry.attributes.normal.array;
@@ -1052,12 +1054,12 @@ function addGround(texture, grid, pavingTex) {
     const sq = projector.toLocal(14.040439, 50.660244);
     shader.uniforms.uSquare = { value: new THREE.Vector2(sq[0], sq[1]) };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;\nvarying vec2 vGround;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;');
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nattribute float aNy;\nattribute float aShore;\nvarying float vCamDist;\nvarying vec2 vGround;\nvarying float vNy;\nvarying float vShore;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;\nvNy = aNy;\nvShore = aShore;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <map_pars_fragment>',
-        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;\nuniform vec2 uSquare;',
+        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nvarying float vNy;\nvarying float vShore;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;\nuniform vec2 uSquare;',
       )
       .replace(
         '#include <map_fragment>',
@@ -1084,10 +1086,13 @@ function addGround(texture, grid, pavingTex) {
         vec3 mixedStones = mix(stones, stonesB, 0.42 + 0.22 * grain);
         float square = 1.0 - smoothstep(8.0, 28.0, length(vGround - vec2(uSquare.x, uSquare.y)));
         diffuseColor.rgb = mix(photo, settled, nearMix);
-        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.08), nearMix * max(stone, square * 0.65) * uHasPave);`
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.08), nearMix * max(stone, square * 0.65) * uHasPave);
+        float quayWall = (1.0 - smoothstep(0.60, 0.68, vNy)) * (1.0 - smoothstep(13.0, 16.0, vShore));
+        vec3 quay = vec3(0.56, 0.54, 0.50) * (0.94 + 0.08 * grain);
+        diffuseColor.rgb = mix(diffuseColor.rgb, quay, quayWall);`
       );
   };
-  groundMat.customProgramCacheKey = () => 'usti-ground-v5';
+  groundMat.customProgramCacheKey = () => 'usti-ground-v6-quay';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;

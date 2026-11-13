@@ -1812,6 +1812,45 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
   }
   pos.needsUpdate = true;
   geometry.computeVertexNormals();
+  const steep = new Float32Array(pos.count);
+  steep.fill(1);
+  const shore = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const hit = shoreDist(pos.getX(i), pos.getZ(i), basins, y0);
+    shore[i] = hit.inside ? 0 : Math.min(hit.shore, 80);
+  }
+  if (index) {
+    for (let t = 0; t < index.count; t += 3) {
+      const i0 = index.getX(t);
+      const i1 = index.getX(t + 1);
+      const i2 = index.getX(t + 2);
+      const ax = pos.getX(i0);
+      const ay = pos.getY(i0);
+      const az = pos.getZ(i0);
+      const bx = pos.getX(i1);
+      const by = pos.getY(i1);
+      const bz = pos.getZ(i1);
+      const cx = pos.getX(i2);
+      const cy = pos.getY(i2);
+      const cz = pos.getZ(i2);
+      const ux = bx - ax;
+      const uy = by - ay;
+      const uz = bz - az;
+      const vx = cx - ax;
+      const vy = cy - ay;
+      const vz = cz - az;
+      const ny = uz * vx - ux * vz;
+      const nx = uy * vz - uz * vy;
+      const nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const faceNy = Math.abs(ny / len);
+      steep[i0] = Math.min(steep[i0], faceNy);
+      steep[i1] = Math.min(steep[i1], faceNy);
+      steep[i2] = Math.min(steep[i2], faceNy);
+    }
+  }
+  geometry.setAttribute('aNy', new THREE.Float32BufferAttribute(steep, 1));
+  geometry.setAttribute('aShore', new THREE.Float32BufferAttribute(shore, 1));
 }
 
 function segIntersect(x1, z1, x2, z2, x3, z3, x4, z4) {
