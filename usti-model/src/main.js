@@ -1,9 +1,9 @@
 import './style.css';
 import * as THREE from 'three';
 import area from '../area.config.json';
-import { makeProjector } from './geom.js';
+import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, sinkGround, walkBlocked, walkHeight, wrapBankSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, sinkGround, walkBlocked, walkHeight } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1035,8 +1035,6 @@ function addGround(texture, grid, pavingTex) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setAttribute('aNy', new THREE.Float32BufferAttribute(new Float32Array(positions.length / 3).fill(1), 1));
-  geometry.setAttribute('aShore', new THREE.Float32BufferAttribute(new Float32Array(positions.length / 3).fill(80), 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const normals = geometry.attributes.normal.array;
@@ -1054,12 +1052,12 @@ function addGround(texture, grid, pavingTex) {
     const sq = projector.toLocal(14.040439, 50.660244);
     shader.uniforms.uSquare = { value: new THREE.Vector2(sq[0], sq[1]) };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nattribute float aNy;\nattribute float aShore;\nvarying float vCamDist;\nvarying vec2 vGround;\nvarying float vNy;\nvarying float vShore;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;\nvNy = aNy;\nvShore = aShore;');
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;\nvarying vec2 vGround;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <map_pars_fragment>',
-        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nvarying float vNy;\nvarying float vShore;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;\nuniform vec2 uSquare;',
+        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;\nuniform vec2 uSquare;',
       )
       .replace(
         '#include <map_fragment>',
@@ -1076,23 +1074,18 @@ function addGround(texture, grid, pavingTex) {
         float green = sharp.g - max(sharp.r, sharp.b);
         float pale = smoothstep(0.28, 0.48, luma);
         vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
-        float nearMix = 1.0 - smoothstep(4.0, 32.0, vCamDist);
-        float stone = smoothstep(0.16, 0.36, luma) * (1.0 - smoothstep(0.008, 0.045, green));
-        vec2 uvA = vGround * 0.54;
-        vec2 uvB = vec2(vGround.y, -vGround.x) * 0.29 + 0.19;
-        vec3 stones = texture2D(paveMap, uvA).rgb;
+        float nearMix = 1.0 - smoothstep(6.0, 38.0, vCamDist);
+        float stone = smoothstep(0.18, 0.34, luma) * (1.0 - smoothstep(0.008, 0.04, green));
+        vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
         float grain = fract(sin(dot(vGround, vec2(12.9898, 78.233))) * 43758.5453);
-        vec3 stonesB = texture2D(paveMap, uvB + grain * 0.03).rgb;
-        vec3 mixedStones = mix(stones, stonesB, 0.42 + 0.22 * grain);
+        vec3 stonesB = texture2D(paveMap, vGround * 0.31 + 0.17).rgb;
+        vec3 mixedStones = mix(stones, stonesB, 0.35 + 0.2 * grain);
         float square = 1.0 - smoothstep(8.0, 28.0, length(vGround - vec2(uSquare.x, uSquare.y)));
         diffuseColor.rgb = mix(photo, settled, nearMix);
-        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.08), nearMix * max(stone, square * 0.65) * uHasPave);
-        float quayWall = (1.0 - smoothstep(0.60, 0.68, vNy)) * (1.0 - smoothstep(13.0, 16.0, vShore));
-        vec3 quay = vec3(0.56, 0.54, 0.50) * (0.94 + 0.08 * grain);
-        diffuseColor.rgb = mix(diffuseColor.rgb, quay, quayWall);`
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.12), nearMix * max(stone, square * 0.7) * uHasPave);`
       );
   };
-  groundMat.customProgramCacheKey = () => 'usti-ground-v6-quay';
+  groundMat.customProgramCacheKey = () => 'usti-ground-v7-walk';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1415,7 +1408,40 @@ function loadPublicTexture(url) {
 }
 
 function detailZones(water) {
-  return { segments: [], slope: null };
+  const segments = [];
+  const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
+  const onEdge = (ax, az, bx, bz) => {
+    const near = (value, limit) => Math.abs(value - limit) < 1.4;
+    return (
+      (near(ax, projector.minX) && near(bx, projector.minX))
+      || (near(ax, projector.maxX) && near(bx, projector.maxX))
+      || (near(az, projector.minZ) && near(bz, projector.minZ))
+      || (near(az, projector.maxZ) && near(bz, projector.maxZ))
+    );
+  };
+  for (const feature of water?.features || []) {
+    if (feature.properties?.water !== 'river') continue;
+    const geometry = feature.geometry;
+    const rings = geometry?.type === 'Polygon' ? geometry.coordinates : geometry?.type === 'MultiPolygon' ? geometry.coordinates.flat() : [];
+    for (const ring of rings) {
+      if (!ring?.length) continue;
+      const local = ring.map(([lon, lat]) => projector.toLocal(lon, lat));
+      for (const part of clipPolyline(local, ...box)) {
+        for (let i = 1; i < part.length; i++) {
+          const a = part[i - 1];
+          const b = part[i];
+          if (onEdge(a[0], a[1], b[0], b[1])) continue;
+          segments.push(a[0], a[1], b[0], b[1]);
+        }
+      }
+    }
+  }
+  const [x0, z0] = projector.toLocal(14.036, 50.6544);
+  const [x1, z1] = projector.toLocal(14.0438, 50.6576);
+  return {
+    segments,
+    slope: { minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) },
+  };
 }
 
 async function boot() {
@@ -1497,13 +1523,8 @@ async function boot() {
   );
   view.add(city.group);
   collision = city.collision;
-  terrain.sample = wrapBankSample(terrain.sample.bind(terrain), city.basins, city.waterY);
   const ground = view.getObjectByName('ground');
-  if (ground?.geometry) sinkGround(ground.geometry, city.basins, city.waterY, []);
-  const parks = city.group.getObjectByName('parks');
-  const asphalt = city.group.getObjectByName('asphalt');
-  if (parks?.geometry) sinkGround(parks.geometry, city.basins, city.waterY, []);
-  if (asphalt?.geometry) sinkGround(asphalt.geometry, city.basins, city.waterY, []);
+  if (ground?.geometry) sinkGround(ground.geometry, city.basins);
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
   labels = city.labels;
@@ -1550,7 +1571,7 @@ async function boot() {
     ring.userData.noShadow = true;
     poiGroup.add(ring, pin);
     poiMarks.push({ pin, x: poi.x, z: poi.z });
-    const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 90);
+    const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 45);
     if (!named) {
       const sprite = makeNameSprite(poi.name);
       sprite.userData.poi = true;
@@ -1581,9 +1602,7 @@ async function boot() {
   collision.rails = bridges.rails;
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
-  if (ground?.geometry) sinkGround(ground.geometry, city.basins, city.waterY, bridges.decks);
-  if (parks?.geometry) sinkGround(parks.geometry, city.basins, city.waterY, bridges.decks);
-  if (asphalt?.geometry) sinkGround(asphalt.geometry, city.basins, city.waterY, bridges.decks);
+  if (ground?.geometry) sinkGround(ground.geometry, city.basins);
   cable = addCableCar(view, {
     aerialways: loaded.aerialways,
     projector,

@@ -44,7 +44,7 @@ Jednoduché výšky (tag `height`, jinak RÚIAN podlaží × 3,1 m když jsou v 
 ## Poznámky k v5 (co se přeskočilo)
 
 - **RÚIAN VFR/GML celé obce** se nestahuje. WFS budov v bboxu se při stažení zkouší; když selže, credit RÚIAN v patičce není. Adresy do hledání jdou z OSM.
-- **Jemnější DMR 2–3 m/px** se nepřegenerovával; základ je ~8 m, břehy v `terrain-detail.bin` ~4 m. Hladina řek zůstává rovina, terén u břehu se k ní svažuje v kódu.
+- **Jemnější DMR 2–3 m/px** se nepřegenerovával; základ je ~8 m, břehy v `terrain-detail.bin` ~4 m. Hladina řek zůstává rovina. Severní břeh u soutoku může na strmém DMR ještě ukázat natažené ortofoto; terén se kvůli tomu nesnižuje, aby zůstal pochozí.
 - **Živé WMTS dlaždice** kolem kamery nejsou. Zůstávají `ortho.jpg` / `ortho-mobile.jpg`.
 - **Worker** na stavbu města není (Three.js meshe vznikají v hlavním vlákně po slice).
 - **GTFS a živé GPS** DPmÚL nejsou. Trolejbusy jedou po OSM relacích; na nízké kvalitě se trasy nenačítají. Nastoupit jde z menu „Svézt se“.
