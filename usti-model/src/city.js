@@ -1631,7 +1631,6 @@ export function bankHeight(rawY, x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins) {
-    if (!basin.river && Math.abs((basin.y ?? riverY) - riverY) > 4) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {
@@ -1642,14 +1641,10 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     if (d < shore) shore = d;
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
-  if (shore < 12) {
-    return Math.min(rawY, riverY + 0.16 + shore * 0.06);
-  }
-  if (shore < 28) {
-    const t = (shore - 12) / 16;
-    const near = riverY + 0.88;
-    const slopeCap = near + (shore - 12) * 0.09;
-    return Math.min(rawY, near * (1 - t) + slopeCap * t, slopeCap);
+  if (shore < 14) return Math.min(rawY, riverY + 0.14 + shore * 0.05);
+  if (shore < 55) {
+    const cap = riverY + 0.84 + (shore - 14) * 0.07;
+    return Math.min(rawY, cap);
   }
   return rawY;
 }
@@ -1662,7 +1657,6 @@ function shoreDist(x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins || []) {
-    if (!basin.river && Math.abs((basin.y ?? riverY) - riverY) > 4) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {
