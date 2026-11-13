@@ -64,6 +64,7 @@ function church(group, hero, opts) {
   tower.position.set(tx, y, opts.lean ? tz + 22 : tz);
   tower.rotation.order = 'XYZ';
   tower.rotation.x = opts.lean || 0;
+  tower.rotation.z = opts.lean ? 0.2 : 0;
   tower.userData.noShadow = true;
   group.add(tower);
   if (opts.buttress) {
@@ -136,8 +137,8 @@ function vojtech(group, hero) {
 }
 
 function vetruse(group, hero) {
-  const x = hero.x;
-  const z = hero.z + 10;
+  const x = hero.x + 2;
+  const z = hero.z + 28;
   const y = hero.y;
   const cream = new THREE.MeshLambertMaterial({ color: 0xf2e6d2 });
   const roof = new THREE.MeshLambertMaterial({ color: 0x8a3228 });
