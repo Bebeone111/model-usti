@@ -1355,7 +1355,7 @@ function frame(now) {
         waterMat.specular.set(skyState.night > 0.45 ? 0xd5eef6 : 0xb7dbe6);
       }
       if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.4 ? 2.6 : 0.22;
-      nightGlow.value = skyState.night > 0.32 ? 1.35 : 0;
+      nightGlow.value = skyState.night > 0.32 ? 1.7 : 0;
       if (waterMat?.userData?.shader) {
         waterMat.userData.shader.uniforms.uTime.value = now * 0.001;
         waterMat.userData.shader.uniforms.uNight.value = skyState.night;

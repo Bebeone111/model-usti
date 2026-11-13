@@ -463,7 +463,7 @@ function facadeOnBeforeCompile(shader) {
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
       float id = floor(vFacadeUv.x / 3.05) * 17.0 + floor(vFacadeUv.y * 9.0);
       float lit = step(0.5, fract(sin(id * 127.13) * 43758.5453));
-      diffuseColor.rgb += vec3(1.0, 0.5, 0.12) * pane * lit * nightGlow * 1.7;`,
+      diffuseColor.rgb += vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * 3.4;`,
     );
 }
 
@@ -584,7 +584,7 @@ function styledFacade(style, name) {
         tone *= mix(1.0, 0.7, base * 0.8);
         float id = floor(vFacadeUv.x / max(uCell, 0.2)) * 19.0 + floor(vFacadeUv.y * 8.0);
         float lit = step(0.52, fract(sin(id * 91.17) * 43758.5453));
-        diffuseColor.rgb = tone + vec3(1.0, 0.5, 0.12) * pane * lit * nightGlow * uGlow * 1.55;`,
+        diffuseColor.rgb = tone + vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * uGlow * 2.8;`,
       );
   };
   material.customProgramCacheKey = () => `usti-landmark-${name}-amber`;
