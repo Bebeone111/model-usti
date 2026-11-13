@@ -31,6 +31,39 @@ function addBox(group, mat, x, y, z, sx, sy, sz, yaw = 0) {
   return mesh;
 }
 
+function northWestPoint(outer) {
+  let pt = outer[0];
+  let best = Infinity;
+  for (const p of outer) {
+    const score = p[0] - p[1];
+    if (score < best) {
+      best = score;
+      pt = p;
+    }
+  }
+  return pt;
+}
+
+function addGableRoof(group, mat, x, y, z, w, h, d, yaw = 0) {
+  const hw = w / 2;
+  const hd = d / 2;
+  const pos = [
+    -hw, 0, -hd, hw, 0, -hd, 0, h, -hd,
+    -hw, 0, hd, 0, h, hd, hw, 0, hd,
+    -hw, 0, -hd, -hw, 0, hd, 0, h, hd, -hw, 0, -hd, 0, h, hd, 0, h, -hd,
+    hw, 0, -hd, 0, h, -hd, 0, h, hd, hw, 0, -hd, 0, h, hd, hw, 0, hd,
+  ];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = yaw;
+  mesh.userData.noShadow = true;
+  group.add(mesh);
+  return mesh;
+}
+
 function church(group, hero, opts) {
   const { x, z, y, outer } = hero;
   const yaw = yawOf(outer);
@@ -50,21 +83,49 @@ function church(group, hero, opts) {
   apse.position.set(x + Math.sin(yaw) * (naveL * 0.48), y + naveH * 0.42, z + Math.cos(yaw) * (naveL * 0.48));
   apse.userData.noShadow = true;
   group.add(apse);
-  const [tx, tz] = westPoint(outer);
+  const [tx, tz] = opts.lean ? northWestPoint(outer) : westPoint(outer);
   const tower = new THREE.Group();
   const shaftH = opts.towerH;
-  const shaft = new THREE.Mesh(new THREE.BoxGeometry(opts.towerW, shaftH, opts.towerW), brick);
+  const w = opts.towerW;
+  const plaster = new THREE.MeshLambertMaterial({ color: opts.wall });
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(w, shaftH, w), plaster);
   shaft.position.y = shaftH / 2;
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(opts.towerW * 0.72, opts.spire, 4), roof);
-  cap.position.y = shaftH + opts.spire / 2;
-  cap.rotation.y = Math.PI / 4;
-  const band = new THREE.Mesh(new THREE.BoxGeometry(opts.towerW * 1.08, 0.4, opts.towerW * 1.08), stone);
-  band.position.y = shaftH * 0.72;
-  tower.add(shaft, cap, band);
-  tower.position.set(tx, y, opts.lean ? tz + 22 : tz);
+  tower.add(shaft);
+  for (const t of [0.28, 0.52, 0.72]) {
+    const course = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.38, w * 1.08), stone);
+    course.position.y = shaftH * t;
+    tower.add(course);
+  }
+  if (opts.gallery) {
+    const gh = 5.6;
+    const gallery = new THREE.Mesh(new THREE.BoxGeometry(w * 1.22, gh, w * 1.22), plaster);
+    gallery.position.y = shaftH + gh / 2;
+    tower.add(gallery);
+    const voidMat = new THREE.MeshLambertMaterial({ color: 0x1a1614 });
+    for (const side of [0, 1, 2, 3]) {
+      const hole = new THREE.Mesh(new THREE.BoxGeometry(w * 0.28, 3.4, 0.2), voidMat);
+      const ang = (side * Math.PI) / 2;
+      hole.position.set(Math.sin(ang) * w * 0.62, shaftH + gh * 0.52, Math.cos(ang) * w * 0.62);
+      hole.rotation.y = ang;
+      tower.add(hole);
+    }
+    const cornice = new THREE.Mesh(new THREE.BoxGeometry(w * 1.34, 0.42, w * 1.34), stone);
+    cornice.position.y = shaftH + gh + 0.1;
+    tower.add(cornice);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(w * 0.78, opts.spire, 4), roof);
+    cap.position.y = shaftH + gh + opts.spire / 2;
+    cap.rotation.y = Math.PI / 4;
+    tower.add(cap);
+  } else {
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(w * 0.72, opts.spire, 4), roof);
+    cap.position.y = shaftH + opts.spire / 2;
+    cap.rotation.y = Math.PI / 4;
+    tower.add(cap);
+  }
+  tower.position.set(tx, y, tz);
   tower.rotation.order = 'XYZ';
   tower.rotation.x = opts.lean || 0;
-  tower.rotation.z = opts.lean ? 0.2 : 0;
+  tower.rotation.z = opts.lean ? Math.abs(opts.lean) : 0;
   tower.userData.noShadow = true;
   group.add(tower);
   if (opts.buttress) {
@@ -92,12 +153,13 @@ function cathedral(group, hero) {
     trim: 0xf2ebe2,
     naveW: 14.5,
     naveL: 28,
-    naveH: 11.5,
+    naveH: 10.2,
     roofH: 5.4,
-    towerH: 48,
-    towerW: 7.2,
-    spire: 14,
-    lean: -0.22,
+    towerH: 36,
+    towerW: 7.6,
+    spire: 13,
+    lean: -0.087,
+    gallery: true,
     buttress: true,
   });
 }
@@ -138,48 +200,40 @@ function vojtech(group, hero) {
 
 function vetruse(group, hero) {
   const x = hero.x;
-  const z = hero.z - 6;
-  const y = hero.y + 1.2;
-  const cream = new THREE.MeshLambertMaterial({ color: 0xf2e6d2 });
-  const roof = new THREE.MeshLambertMaterial({ color: 0x8a3228 });
-  const wood = new THREE.MeshLambertMaterial({ color: 0x6e5438 });
+  const z = hero.z - 4;
+  const y = hero.y + 1.4;
+  const yaw = 0.22;
+  const plaster = new THREE.MeshLambertMaterial({ color: 0xf3ead8 });
+  const roof = new THREE.MeshLambertMaterial({ color: 0x8a3a2c });
+  const wood = new THREE.MeshLambertMaterial({ color: 0x6a5138 });
+  const trim = new THREE.MeshLambertMaterial({ color: 0xefe6d6 });
   const glass = new THREE.MeshLambertMaterial({
-    color: 0x6a90a8,
-    emissive: 0x243848,
-    emissiveIntensity: 0.12,
+    color: 0x6d8aa0,
+    emissive: 0x3a2410,
+    emissiveIntensity: 0.18,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.78,
   });
-  const trim = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 });
-  addBox(group, cream, x, y + 4.6, z, 22, 9.2, 16, 0.12);
-  addBox(group, roof, x, y + 9.6, z, 23.6, 1.4, 17.4, 0.12);
-  const wing = addBox(group, cream, x - 9.2, y + 3.4, z + 2.2, 10, 6.8, 11, 0.12);
-  wing.rotation.y = 0.16;
-  addBox(group, roof, x - 9.2, y + 7.2, z + 2.2, 10.8, 0.9, 11.8, 0.12);
-  const turret = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.6, 12.4, 12), cream);
-  turret.position.set(x + 8.4, y + 6.6, z + 1.2);
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(4.1, 5.6, 12), roof);
-  cap.position.set(x + 8.4, y + 15.4, z + 1.2);
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(18, 0.28, 10.5), wood);
-  deck.position.set(x - 1.0, y + 9.35, z + 12.2);
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(18, 1.15, 0.16), trim);
-  rail.position.set(x - 1.0, y + 9.95, z + 17.3);
-  const window = new THREE.Mesh(new THREE.BoxGeometry(16.4, 3.4, 0.16), glass);
-  window.position.set(x - 0.6, y + 5.6, z + 8.1);
-  const northGlass = new THREE.Mesh(new THREE.BoxGeometry(15.8, 3.2, 0.18), glass);
-  northGlass.position.set(x - 0.4, y + 5.5, z + 8.08);
-  const posts = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6), wood);
-  for (const mesh of [turret, cap, deck, rail, window, northGlass]) {
-    mesh.userData.noShadow = true;
-    group.add(mesh);
-  }
-  for (const dx of [-6, -2, 2, 6]) {
-    const post = posts.clone();
-    post.position.set(x - 1.0 + dx, y + 10.6, z + 17.2);
+  addBox(group, plaster, x, y + 4.1, z, 20.5, 8.2, 13.6, yaw);
+  addGableRoof(group, roof, x, y + 8.2, z, 21.8, 5.4, 14.8, yaw);
+  const risX = x + Math.cos(yaw) * 7.4;
+  const risZ = z + Math.sin(yaw) * 7.4;
+  addBox(group, plaster, risX, y + 6.2, risZ, 6.4, 12.4, 6.4, yaw);
+  addGableRoof(group, roof, risX, y + 12.4, risZ, 7.2, 4.2, 7.2, yaw + Math.PI / 2);
+  const east = yaw - Math.PI / 2;
+  const tx = x + Math.cos(east) * 9.2;
+  const tz = z + Math.sin(east) * 9.2;
+  addBox(group, wood, tx, y + 4.35, tz, 11.5, 0.22, 8.4, yaw);
+  addBox(group, trim, tx + Math.cos(east) * 4.0, y + 4.95, tz + Math.sin(east) * 4.0, 11.5, 1.05, 0.14, yaw);
+  for (const side of [-3.6, 0, 3.6]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.15, 6), wood);
+    post.position.set(tx + Math.cos(yaw) * side + Math.cos(east) * 3.9, y + 5.0, tz + Math.sin(yaw) * side + Math.sin(east) * 3.9);
     post.userData.noShadow = true;
     group.add(post);
   }
-  return boxBlocker(x, z, 13, 12, y + 10);
+  addBox(group, glass, x + Math.sin(yaw) * 6.7, y + 4.6, z + Math.cos(yaw) * 6.7, 12.4, 2.6, 0.14, yaw);
+  addBox(group, glass, x - Math.sin(yaw) * 6.7, y + 4.6, z - Math.cos(yaw) * 6.7, 10.8, 2.4, 0.14, yaw);
+  return boxBlocker(x, z, 14, 11, y + 12);
 }
 
 function forum(group, hero) {

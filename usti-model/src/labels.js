@@ -78,7 +78,15 @@ export function updateLabels(sprites, camera, { maxDist = 260, hide = false, blo
       box.right > 1 - margin ||
       box.bottom < -1 + margin ||
       box.top > 1 - margin ||
-      blockers.some((blocker) => rectsOverlap(box, blocker));
+      blockers.some((blocker) => {
+        const pad = 0.06;
+        return (
+          box.left < blocker.right + pad
+          && box.right > blocker.left - pad
+          && box.bottom < blocker.top + pad
+          && box.top > blocker.bottom - pad
+        );
+      });
     sprite.center.set(0.5, 0);
     if (clipped) {
       sprite.visible = false;
@@ -93,12 +101,24 @@ export function updateLabels(sprites, camera, { maxDist = 260, hide = false, blo
   const kept = [];
   for (const candidate of candidates) {
     const duplicate = kept.some((other) => {
-      if (!rectsOverlap(candidate.box, other.box)) return false;
+      const same = candidate.text && candidate.text === other.text;
+      const cx = (candidate.box.left + candidate.box.right) / 2;
+      const cy = (candidate.box.bottom + candidate.box.top) / 2;
+      const ox = (other.box.left + other.box.right) / 2;
+      const oy = (other.box.bottom + other.box.top) / 2;
+      const near = Math.hypot(cx - ox, cy - oy) < (same ? 0.42 : 0.12);
+      if (same && (near || rectsOverlap(candidate.box, other.box))) return true;
+      if (!rectsOverlap(candidate.box, other.box) && !near) return false;
       const shorter = candidate.text.length <= other.text.length ? candidate.text : other.text;
       const longer = shorter === candidate.text ? other.text : candidate.text;
       return longer.includes(shorter);
     });
-    const crowded = kept.some((other) => rectsOverlap(candidate.box, other.box));
+    const crowded = kept.some((other) => {
+      const pad = 0.02;
+      const a = candidate.box;
+      const b = other.box;
+      return a.left - pad < b.right && a.right + pad > b.left && a.bottom - pad < b.top && a.top + pad > b.bottom;
+    });
     if (duplicate || crowded || kept.length >= MAX_VISIBLE) {
       candidate.sprite.visible = false;
       candidate.sprite.material.opacity = 0;

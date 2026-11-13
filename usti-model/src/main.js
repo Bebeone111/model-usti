@@ -498,18 +498,25 @@ function faceMarianDeck() {
   const named = (collision.decks || []).find((deck) => deck.name === 'marian' && deck.walk);
   const deck = named || nearestWalkDeck(collision.decks, player.x, player.z, 160)?.deck;
   if (!deck) return;
-  const cx = (deck.minX + deck.maxX) / 2;
-  const cz = (deck.minZ + deck.maxZ) / 2;
-  player.x = cx;
-  player.z = cz;
-  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   let north = null;
+  let south = null;
   for (const p of deck.outer || []) {
     if (!north || p[1] > north[1]) north = p;
+    if (!south || p[1] < south[1]) south = p;
   }
+  const cx = (deck.minX + deck.maxX) / 2;
+  const cz = (deck.minZ + deck.maxZ) / 2;
+  if (north && south) {
+    player.x = north[0] * 0.42 + south[0] * 0.58;
+    player.z = north[1] * 0.42 + south[1] * 0.58;
+  } else {
+    player.x = cx;
+    player.z = cz;
+  }
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   if (north) player.yaw = Math.atan2(-(north[0] - player.x), -(north[1] - player.z));
   else player.yaw = yawAlongDeck(deck, true);
-  player.pitch = 0.12;
+  player.pitch = -0.1;
   shotLook = 'marian';
 }
 
@@ -716,7 +723,7 @@ function updateCamera() {
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
   if (shotMode && shotLook === 'marian') {
-    camera.lookAt(-(player.x + fx * 28), player.y + 18 + sin * 10, player.z + fz * 28);
+    camera.lookAt(-(player.x + fx * 36), player.y + 1.55 + sin * 8, player.z + fz * 36);
     return;
   }
   const lookY = Math.max(player.y + 1.15, terrain.sample(player.x + fx * 9, player.z + fz * 9) + 1.2);
@@ -1348,7 +1355,7 @@ function frame(now) {
         waterMat.specular.set(skyState.night > 0.45 ? 0xd5eef6 : 0xb7dbe6);
       }
       if (lampMat) lampMat.emissiveIntensity = skyState.night > 0.4 ? 2.6 : 0.22;
-      nightGlow.value = skyState.night > 0.32 ? 2.45 : 0;
+      nightGlow.value = skyState.night > 0.32 ? 1.05 : 0;
       if (waterMat?.userData?.shader) {
         waterMat.userData.shader.uniforms.uTime.value = now * 0.001;
         waterMat.userData.shader.uniforms.uNight.value = skyState.night;
@@ -1563,7 +1570,7 @@ async function boot() {
     ring.userData.noShadow = true;
     poiGroup.add(ring, pin);
     poiMarks.push({ pin, x: poi.x, z: poi.z });
-    const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 45);
+    const named = city.labelPoints.some((point) => point.text === poi.name && Math.hypot(point.x - poi.x, point.z - poi.z) < 90);
     if (!named) {
       const sprite = makeNameSprite(poi.name);
       sprite.userData.poi = true;

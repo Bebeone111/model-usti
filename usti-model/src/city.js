@@ -456,12 +456,14 @@ function facadeOnBeforeCompile(shader) {
       float fy = fract(vFacadeUv.y);
       float pane = step(0.48, fx) * step(fx, 2.4) * step(0.28, fy) * step(fy, 0.74);
       float course = step(fy, 0.05);
-      vec3 glass = vec3(0.22, 0.33, 0.4);
-      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.8);
+      vec3 glass = vec3(0.18, 0.22, 0.26);
+      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.72);
       diffuseColor.rgb *= mix(1.0, 0.8, course);
       float cornice = step(0.9, fy);
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
-      diffuseColor.rgb += vec3(1.0, 0.82, 0.45) * pane * nightGlow * 2.55;`,
+      float id = floor(vFacadeUv.x / 3.05) * 17.0 + floor(vFacadeUv.y * 9.0);
+      float lit = step(0.62, fract(sin(id * 127.13) * 43758.5453));
+      diffuseColor.rgb += vec3(1.0, 0.58, 0.18) * pane * lit * nightGlow * 1.05;`,
     );
 }
 
@@ -521,7 +523,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v4';
+  material.customProgramCacheKey = () => 'usti-facade-v6-amber';
   return material;
 }
 
@@ -580,10 +582,12 @@ function styledFacade(style, name) {
         tone = mix(tone, uGlass, pane * 0.9);
         tone = mix(tone, uTrim, cornice);
         tone *= mix(1.0, 0.7, base * 0.8);
-        diffuseColor.rgb = tone + vec3(1.0, 0.78, 0.42) * pane * nightGlow * uGlow * 2.4;`,
+        float id = floor(vFacadeUv.x / max(uCell, 0.2)) * 19.0 + floor(vFacadeUv.y * 8.0);
+        float lit = step(0.64, fract(sin(id * 91.17) * 43758.5453));
+        diffuseColor.rgb = tone + vec3(1.0, 0.56, 0.16) * pane * lit * nightGlow * uGlow * 1.05;`,
       );
   };
-  material.customProgramCacheKey = () => `usti-landmark-${name}`;
+  material.customProgramCacheKey = () => `usti-landmark-${name}-amber`;
   return material;
 }
 
@@ -1018,12 +1022,12 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const az = a[1] + dz * t0;
         const bx = a[0] + dx * t1;
         const bz = a[1] + dz * t1;
-        const landX = (-dz / len) * 5.4;
-        const landZ = (dx / len) * 5.4;
-        pushRibbon(gravel, ax, az, bx, bz, landX, landZ, () => waterY + 1.18, 0, waterY + 1.22);
-        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.4, (-dx / len) * 1.4, () => waterY, 0.04, waterY + 0.1);
-        const yb = waterY - 0.2;
-        const yt = waterY + 1.25;
+        const landX = (-dz / len) * 2.4;
+        const landZ = (dx / len) * 2.4;
+        pushRibbon(gravel, ax, az, bx, bz, landX, landZ, () => waterY + 1.35, 0, waterY + 1.45);
+        pushRibbon(wet, ax, az, bx, bz, (dz / len) * 1.2, (-dx / len) * 1.2, () => waterY, 0.04, waterY + 0.1);
+        const yb = waterY - 0.15;
+        const yt = waterY + 1.55;
         quay.push(ax, yb, az, bx, yb, bz, bx, yt, bz, ax, yb, az, bx, yt, bz, ax, yt, az);
       }
     }
@@ -1109,11 +1113,18 @@ export async function buildCity(data, projector, hooks = {}) {
       const [cx0, cz0] = ringCentroid(outer);
       const vetruseAt = projector.toLocal(14.039608, 50.655013);
       const lookoutAt = projector.toLocal(14.03980, 50.65540);
+      const squareAt = projector.toLocal(14.040439, 50.660244);
+      const churchAt = projector.toLocal(14.040451, 50.659072);
       if (
         styleName !== 'vetruse'
         && (Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 95 || Math.hypot(cx0 - lookoutAt[0], cz0 - lookoutAt[1]) < 70)
       ) {
         return;
+      }
+      if (styleName !== 'cathedral') {
+        const span = squareAt[1] - churchAt[1];
+        const along = span ? (cz0 - churchAt[1]) / span : -1;
+        if (along > 0.12 && along < 0.88 && Math.abs(cx0 - churchAt[0]) < 36) return;
       }
       if (styleName && HERO_MESH.has(styleName)) {
         const [hx, hz] = ringCentroid(outer);
@@ -1620,7 +1631,7 @@ export function bankHeight(rawY, x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins) {
-    if (!basin.river && Math.abs(basin.y - riverY) > 0.2) continue;
+    if (!basin.river && Math.abs(basin.y - riverY) > 1.8) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {
@@ -1631,12 +1642,15 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     if (d < shore) shore = d;
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
-  if (shore < 72) {
-    const t = 1 - shore / 72;
-    const target = riverY + 1.12 + shore * 0.12;
-    const cap = riverY + 1.3 + shore * 0.16;
-    const blended = rawY * (1 - t * 0.92) + target * (t * 0.92);
-    return Math.min(blended, cap);
+  if (shore < 12) {
+    return Math.min(rawY, riverY + 0.18 + shore * 0.07);
+  }
+  if (shore < 40) {
+    const t = (shore - 12) / 28;
+    const near = riverY + 1.02;
+    const slopeCap = near + (shore - 12) * 0.11;
+    const blended = rawY * t * 0.45 + near * (1 - t * 0.45);
+    return Math.min(rawY, blended, slopeCap);
   }
   return rawY;
 }
@@ -1649,7 +1663,7 @@ function shoreDist(x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins || []) {
-    if (!basin.river && Math.abs(basin.y - riverY) > 0.2) continue;
+    if (!basin.river && Math.abs(basin.y - riverY) > 1.8) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {
@@ -1711,7 +1725,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);
-      if (!inside && shore > 48) continue;
+      if (!inside && shore > 22) continue;
       const low = Math.min(ay, by, cy);
       const cap = y0 + (inside ? -0.4 : 0.55 + Math.min(shore, 20) * 0.06);
       const next = Math.min(low + 0.35, cap);
