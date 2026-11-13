@@ -137,9 +137,9 @@ function vojtech(group, hero) {
 }
 
 function vetruse(group, hero) {
-  const x = hero.x + 2;
-  const z = hero.z + 28;
-  const y = hero.y;
+  const x = hero.x;
+  const z = hero.z - 6;
+  const y = hero.y + 1.2;
   const cream = new THREE.MeshLambertMaterial({ color: 0xf2e6d2 });
   const roof = new THREE.MeshLambertMaterial({ color: 0x8a3228 });
   const wood = new THREE.MeshLambertMaterial({ color: 0x6e5438 });
