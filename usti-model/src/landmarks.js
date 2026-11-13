@@ -61,7 +61,7 @@ function church(group, hero, opts) {
   const band = new THREE.Mesh(new THREE.BoxGeometry(opts.towerW * 1.08, 0.4, opts.towerW * 1.08), stone);
   band.position.y = shaftH * 0.72;
   tower.add(shaft, cap, band);
-  tower.position.set(tx, y, opts.lean ? tz + 5.5 : tz);
+  tower.position.set(tx, y, opts.lean ? tz + 22 : tz);
   tower.rotation.order = 'XYZ';
   tower.rotation.x = opts.lean || 0;
   tower.userData.noShadow = true;

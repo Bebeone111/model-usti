@@ -495,21 +495,22 @@ function yawAlongDeck(deck, towardNorth = true) {
 }
 
 function faceMarianDeck() {
-  const snap = nearestWalkDeck(collision.decks, player.x, player.z, 90);
-  if (!snap) return;
-  player.x = snap.cx;
-  player.z = snap.cz;
+  const named = (collision.decks || []).find((deck) => deck.name === 'marian' && deck.walk);
+  const deck = named || nearestWalkDeck(collision.decks, player.x, player.z, 160)?.deck;
+  if (!deck) return;
+  const cx = (deck.minX + deck.maxX) / 2;
+  const cz = (deck.minZ + deck.maxZ) / 2;
+  player.x = cx;
+  player.z = cz;
   player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   let north = null;
-  for (const p of snap.deck.outer || []) {
+  for (const p of deck.outer || []) {
     if (!north || p[1] > north[1]) north = p;
   }
-  if (north) {
-    player.yaw = Math.atan2(-(north[0] - player.x), -(north[1] - player.z));
-  } else {
-    player.yaw = yawAlongDeck(snap.deck, true);
-  }
-  player.pitch = -0.12;
+  if (north) player.yaw = Math.atan2(-(north[0] - player.x), -(north[1] - player.z));
+  else player.yaw = yawAlongDeck(deck, true);
+  player.pitch = 0.12;
+  shotLook = 'marian';
 }
 
 function goHome() {
@@ -714,8 +715,8 @@ function updateCamera() {
   camY = Math.max(player.y + 1.7, floor + 2.05, camY);
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
-  if (shotMode) {
-    camera.lookAt(-(player.x + fx * 22), player.y + 6.5 + sin * 14, player.z + fz * 22);
+  if (shotMode && shotLook === 'marian') {
+    camera.lookAt(-(player.x + fx * 28), player.y + 18 + sin * 10, player.z + fz * 28);
     return;
   }
   const lookY = Math.max(player.y + 1.15, terrain.sample(player.x + fx * 9, player.z + fz * 9) + 1.2);
@@ -1101,6 +1102,7 @@ async function loadTexture(file, onProgress) {
 let wantPlay = false;
 let wantTour = false;
 let built = false;
+let shotLook = '';
 
 function beginPlay(tour) {
   wantPlay = true;
@@ -1676,9 +1678,11 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
+    shotLook = '';
     const ok = placeNear(x, z, hashed[2], hashed[3]);
-    if (ok && Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
+    if (Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
       faceMarianDeck();
+      return true;
     }
     return ok;
   };

@@ -471,7 +471,7 @@ function buildMarian(pts, waterY, sample, detail) {
   if (railMesh) group.add(railMesh);
   return {
     group,
-    decks: [deckRecord(fr, deckY + 0.06, half + 0.15)],
+    decks: [Object.assign(deckRecord(fr, deckY + 0.06, half + 0.15), { name: 'marian' })],
     rails: railBlockers(fr, half, deckY),
     lights: pylons.map((p) => ({ x: p.x, y: p.y + 12, z: p.z })),
   };
