@@ -1091,7 +1091,8 @@ function reveal() {
     intro = 0;
   } else {
     intro = shotMode ? 0 : 1;
-    camBack = shotMode ? 8.2 : 16.5;
+    camBack = shotMode ? 6.4 : 16.5;
+    if (shotMode) setThirdPerson(false);
     if (!shotMode) player.pitch = -0.7;
   }
 }

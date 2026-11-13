@@ -1622,10 +1622,10 @@ export function bankHeight(rawY, x, z, basins, riverY) {
     if (d < shore) shore = d;
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
-  if (shore < 36) {
-    const t = 1 - shore / 36;
-    const target = riverY + 0.08 + shore * 0.085;
-    const cap = riverY + 0.28 + shore * 0.09;
+  if (shore < 42) {
+    const t = 1 - shore / 42;
+    const target = riverY + 1.12 + shore * 0.05;
+    const cap = riverY + 1.25 + shore * 0.07;
     const blended = rawY * (1 - t * 0.98) + target * (t * 0.98);
     return Math.min(blended, cap);
   }
@@ -1664,12 +1664,12 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
     const { inside, shore } = shoreDist(x, z, basins, y0);
     for (const deck of decks) {
       if (!deck.walk) continue;
-      if (x < deck.minX - 18 || x > deck.maxX + 18 || z < deck.minZ - 18 || z > deck.maxZ + 18) continue;
+      if (x < deck.minX - 28 || x > deck.maxX + 28 || z < deck.minZ - 28 || z > deck.maxZ + 28) continue;
       const on = pointInRing(x, z, deck.outer);
       const edge = distToRing(x, z, deck.outer);
-      if (on || edge < 16) {
-        if (inside || shore < 22) y = Math.min(y, y0 - 0.55);
-        else y = Math.min(y, deck.y - 0.55);
+      if (on || edge < 24) {
+        const cap = inside || shore < 28 ? y0 - 0.55 : deck.y - 0.4;
+        y = Math.min(y, cap);
       }
     }
     pos.setY(i, y);
@@ -1703,7 +1703,7 @@ export function sinkGround(geometry, basins, riverY, decks = []) {
       const mx = (ax + bx + cx) / 3;
       const mz = (az + bz + cz) / 3;
       const { inside, shore } = shoreDist(mx, mz, basins, y0);
-      if (!inside && shore > 36) continue;
+      if (!inside && shore > 48) continue;
       const low = Math.min(ay, by, cy);
       const cap = y0 + (inside ? -0.4 : 0.55 + Math.min(shore, 20) * 0.06);
       const next = Math.min(low + 0.35, cap);
