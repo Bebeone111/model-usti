@@ -1117,7 +1117,7 @@ export async function buildCity(data, projector, hooks = {}) {
       const churchAt = projector.toLocal(14.040451, 50.659072);
       if (
         styleName !== 'vetruse'
-        && (Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 95 || Math.hypot(cx0 - lookoutAt[0], cz0 - lookoutAt[1]) < 70)
+        && (Math.hypot(cx0 - vetruseAt[0], cz0 - vetruseAt[1]) < 120 || Math.hypot(cx0 - lookoutAt[0], cz0 - lookoutAt[1]) < 130)
       ) {
         return;
       }
@@ -1631,7 +1631,7 @@ export function bankHeight(rawY, x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins) {
-    if (!basin.river && Math.abs(basin.y - riverY) > 1.8) continue;
+    if (!basin.river && Math.abs((basin.y ?? riverY) - riverY) > 4) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {
@@ -1643,14 +1643,13 @@ export function bankHeight(rawY, x, z, basins, riverY) {
   }
   if (inside) return Math.min(rawY, riverY - 0.9);
   if (shore < 12) {
-    return Math.min(rawY, riverY + 0.18 + shore * 0.07);
+    return Math.min(rawY, riverY + 0.16 + shore * 0.06);
   }
-  if (shore < 40) {
-    const t = (shore - 12) / 28;
-    const near = riverY + 1.02;
-    const slopeCap = near + (shore - 12) * 0.11;
-    const blended = rawY * t * 0.45 + near * (1 - t * 0.45);
-    return Math.min(rawY, blended, slopeCap);
+  if (shore < 28) {
+    const t = (shore - 12) / 16;
+    const near = riverY + 0.88;
+    const slopeCap = near + (shore - 12) * 0.09;
+    return Math.min(rawY, near * (1 - t) + slopeCap * t, slopeCap);
   }
   return rawY;
 }
@@ -1663,7 +1662,7 @@ function shoreDist(x, z, basins, riverY) {
   let inside = false;
   let shore = Infinity;
   for (const basin of basins || []) {
-    if (!basin.river && Math.abs(basin.y - riverY) > 1.8) continue;
+    if (!basin.river && Math.abs((basin.y ?? riverY) - riverY) > 4) continue;
     const hit = pointInRing(x, z, basin.outer);
     let hole = false;
     for (const ring of basin.holes || []) {

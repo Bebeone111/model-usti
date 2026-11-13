@@ -101,14 +101,8 @@ export function updateLabels(sprites, camera, { maxDist = 260, hide = false, blo
   const kept = [];
   for (const candidate of candidates) {
     const duplicate = kept.some((other) => {
-      const same = candidate.text && candidate.text === other.text;
-      const cx = (candidate.box.left + candidate.box.right) / 2;
-      const cy = (candidate.box.bottom + candidate.box.top) / 2;
-      const ox = (other.box.left + other.box.right) / 2;
-      const oy = (other.box.bottom + other.box.top) / 2;
-      const near = Math.hypot(cx - ox, cy - oy) < (same ? 0.42 : 0.12);
-      if (same && (near || rectsOverlap(candidate.box, other.box))) return true;
-      if (!rectsOverlap(candidate.box, other.box) && !near) return false;
+      if (candidate.text && candidate.text === other.text) return true;
+      if (!rectsOverlap(candidate.box, other.box)) return false;
       const shorter = candidate.text.length <= other.text.length ? candidate.text : other.text;
       const longer = shorter === candidate.text ? other.text : candidate.text;
       return longer.includes(shorter);

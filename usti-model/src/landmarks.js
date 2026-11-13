@@ -200,8 +200,8 @@ function vojtech(group, hero) {
 
 function vetruse(group, hero) {
   const x = hero.x;
-  const z = hero.z - 4;
-  const y = hero.y + 1.4;
+  const z = hero.z + 22;
+  const y = hero.y + 6;
   const yaw = 0.22;
   const plaster = new THREE.MeshLambertMaterial({ color: 0xf3ead8 });
   const roof = new THREE.MeshLambertMaterial({ color: 0x8a3a2c });
@@ -214,12 +214,12 @@ function vetruse(group, hero) {
     transparent: true,
     opacity: 0.78,
   });
-  addBox(group, plaster, x, y + 4.1, z, 20.5, 8.2, 13.6, yaw);
-  addGableRoof(group, roof, x, y + 8.2, z, 21.8, 5.4, 14.8, yaw);
-  const risX = x + Math.cos(yaw) * 7.4;
-  const risZ = z + Math.sin(yaw) * 7.4;
-  addBox(group, plaster, risX, y + 6.2, risZ, 6.4, 12.4, 6.4, yaw);
-  addGableRoof(group, roof, risX, y + 12.4, risZ, 7.2, 4.2, 7.2, yaw + Math.PI / 2);
+  addBox(group, plaster, x, y + 5.2, z, 26, 10.4, 16.5, yaw);
+  addGableRoof(group, roof, x, y + 10.4, z, 27.6, 6.6, 17.8, yaw);
+  const risX = x + Math.cos(yaw) * 9.2;
+  const risZ = z + Math.sin(yaw) * 9.2;
+  addBox(group, plaster, risX, y + 7.6, risZ, 7.6, 15.2, 7.6, yaw);
+  addGableRoof(group, roof, risX, y + 15.2, risZ, 8.6, 5.2, 8.6, yaw + Math.PI / 2);
   const east = yaw - Math.PI / 2;
   const tx = x + Math.cos(east) * 9.2;
   const tz = z + Math.sin(east) * 9.2;
