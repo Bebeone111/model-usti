@@ -1138,6 +1138,7 @@ export async function buildCity(data, projector, hooks = {}) {
           outer: closedOuter,
           holes: closedHoles,
           top,
+          groundY: sample(hx, hz),
           blocksWalk: true,
           blocksCamera: true,
           ...bounds,
@@ -1199,10 +1200,13 @@ export async function buildCity(data, projector, hooks = {}) {
       const closedOuter = outer.concat([outer[0]]);
       const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
       const bounds = polygonBounds([closedOuter, ...closedHoles]);
+      let groundY = Infinity;
+      for (const p of outer) groundY = Math.min(groundY, sample(p[0], p[1]));
       blockers.push({
         outer: closedOuter,
         holes: closedHoles,
         top,
+        groundY: Number.isFinite(groundY) ? groundY : sample(outer[0][0], outer[0][1]),
         blocksWalk: true,
         blocksCamera: true,
         ...bounds,
@@ -1639,6 +1643,47 @@ export function walkHeight(collision, x, z, ground) {
 
 export function sinkGround() {
   // Keep the ortho mesh on the DMR. Water is a separate flat plane.
+}
+
+function seatY(x, z, y, collision, basins) {
+  for (const basin of basins || []) {
+    if (!basin.river) continue;
+    if (pointInRing(x, z, basin.outer)) return y;
+  }
+  let seat = y;
+  for (const block of collision?.blockers || []) {
+    if (!block.blocksWalk || block.kind === 'water' || !Number.isFinite(block.groundY)) continue;
+    if (x < block.minX - 16 || x > block.maxX + 16 || z < block.minZ - 16 || z > block.maxZ + 16) continue;
+    if (pointInRing(x, z, block.outer) || distToClosedRing(x, z, block.outer) < 14) {
+      seat = Math.max(seat, block.groundY);
+    }
+  }
+  return seat;
+}
+
+export function wrapSeatSample(sample, collision, basins) {
+  return (x, z) => seatY(x, z, sample(x, z), collision, basins);
+}
+
+export function terraceGround(geometry, collision, basins) {
+  if (!geometry?.attributes?.position) return;
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setY(i, seatY(x, z, pos.getY(i), collision, basins));
+  }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+function distToClosedRing(x, z, ring) {
+  let best = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const d = distPointSeg(x, z, ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+    if (d < best) best = d;
+  }
+  return best;
 }
 
 function segIntersect(x1, z1, x2, z2, x3, z3, x4, z4) {

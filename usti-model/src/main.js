@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, walkBlocked, walkHeight } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1074,19 +1074,19 @@ function addGround(texture, grid, pavingTex) {
         float green = sharp.g - max(sharp.r, sharp.b);
         float pale = smoothstep(0.28, 0.48, luma);
         vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
-        float nearMix = 1.0 - smoothstep(8.0, 120.0, vCamDist);
-        float stone = smoothstep(0.16, 0.38, luma) * (1.0 - smoothstep(0.006, 0.05, green));
+        float nearMix = 1.0 - smoothstep(6.0, 140.0, vCamDist);
         vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
         float grain = fract(sin(dot(vGround, vec2(12.9898, 78.233))) * 43758.5453);
         vec3 stonesB = texture2D(paveMap, vGround * 0.31 + 0.17).rgb;
         vec3 mixedStones = mix(stones, stonesB, 0.35 + 0.2 * grain);
         float square = 1.0 - smoothstep(8.0, 36.0, length(vGround - vec2(uSquare.x, uSquare.y)));
-        float street = (1.0 - smoothstep(0.01, 0.06, green)) * nearMix;
-        diffuseColor.rgb = mix(photo, settled, nearMix);
-        diffuseColor.rgb = mix(diffuseColor.rgb, mix(mixedStones, settled, 0.1), max(stone, square * 0.75) * uHasPave * max(nearMix, street));`
+        float grass = smoothstep(0.02, 0.08, green);
+        vec3 paved = mix(mixedStones, settled, 0.16);
+        float cover = mix(nearMix, 1.0, square * 0.85) * (1.0 - 0.72 * grass) * uHasPave;
+        diffuseColor.rgb = mix(photo, paved, cover);`
       );
   };
-  groundMat.customProgramCacheKey = () => 'usti-ground-v7-solid';
+  groundMat.customProgramCacheKey = () => 'usti-ground-v7-cover';
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1524,6 +1524,13 @@ async function boot() {
   );
   view.add(city.group);
   collision = city.collision;
+  terrain.sample = wrapSeatSample(terrain.sample.bind(terrain), collision, city.basins);
+  const ground = view.getObjectByName('ground');
+  const asphalt = city.group.getObjectByName('asphalt');
+  const parks = city.group.getObjectByName('parks');
+  if (ground?.geometry) terraceGround(ground.geometry, collision, city.basins);
+  if (asphalt?.geometry) terraceGround(asphalt.geometry, collision, city.basins);
+  if (parks?.geometry) terraceGround(parks.geometry, collision, city.basins);
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
   labels = city.labels;
