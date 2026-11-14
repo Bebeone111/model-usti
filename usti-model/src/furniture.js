@@ -70,7 +70,7 @@ function instanced(geometry, material, points, place) {
 function stripeGeometry() {
   const pieces = [];
   for (let i = 0; i < 4; i++) {
-    const piece = new THREE.BoxGeometry(0.48, 0.04, 3.4);
+    const piece = new THREE.BoxGeometry(0.48, 0.07, 3.4);
     piece.translate((i - 1.5) * 0.95, 0, 0);
     pieces.push(piece);
   }
