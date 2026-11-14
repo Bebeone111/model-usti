@@ -209,6 +209,162 @@ export function boxBlocker(x, z, hx, hz, y = 0) {
   };
 }
 
+function jednoUstiTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 384;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#1d4a86';
+  g.fillRect(0, 0, 512, 384);
+  g.fillStyle = '#f3f6fa';
+  g.fillRect(18, 18, 476, 348);
+  g.fillStyle = '#1d4a86';
+  g.fillRect(32, 32, 448, 320);
+  g.strokeStyle = '#f3f6fa';
+  g.lineWidth = 9;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.beginPath();
+  g.arc(168, 108, 26, 0, Math.PI * 2);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(168, 138);
+  g.lineTo(168, 214);
+  g.moveTo(168, 158);
+  g.lineTo(118, 198);
+  g.moveTo(168, 158);
+  g.lineTo(214, 186);
+  g.moveTo(168, 214);
+  g.lineTo(128, 278);
+  g.moveTo(168, 214);
+  g.lineTo(208, 278);
+  g.stroke();
+  g.fillStyle = '#f3f6fa';
+  g.font = '700 54px sans-serif';
+  g.textAlign = 'left';
+  g.fillText('JednoÚstí', 250, 200);
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  return map;
+}
+
+function makeLogoWalker() {
+  const skin = new THREE.MeshLambertMaterial({ color: 0xc4a07a });
+  const hair = new THREE.MeshLambertMaterial({ color: 0x2a2420 });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0xf4f4f2 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3340 });
+  const shoes = new THREE.MeshLambertMaterial({ color: 0x1a1816 });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x2a74e0, emissive: 0x1a4aad, emissiveIntensity: 0.45 });
+  const box = (w, h, d, mat) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const group = new THREE.Group();
+  const torso = box(0.36, 0.46, 0.18, shirt);
+  torso.position.y = 1.14;
+  const head = box(0.2, 0.22, 0.2, skin);
+  head.position.y = 1.52;
+  const cap = box(0.21, 0.08, 0.21, hair);
+  cap.position.y = 1.64;
+  const brow = box(0.18, 0.035, 0.06, glass);
+  brow.position.set(0, 1.7, -0.1);
+  const lensL = box(0.07, 0.04, 0.05, glass);
+  lensL.position.set(-0.05, 1.705, -0.12);
+  const lensR = box(0.07, 0.04, 0.05, glass);
+  lensR.position.set(0.05, 1.705, -0.12);
+  group.add(torso, head, cap, brow, lensL, lensR);
+  function leg(side) {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.09, 0.9, 0);
+    const thigh = box(0.12, 0.4, 0.12, pants);
+    thigh.position.y = -0.2;
+    const shin = box(0.11, 0.4, 0.11, pants);
+    shin.position.y = -0.6;
+    const foot = box(0.12, 0.06, 0.2, shoes);
+    foot.position.set(0, -0.83, -0.05);
+    hip.add(thigh, shin, foot);
+    hip.rotation.x = side * 0.18;
+    return hip;
+  }
+  function arm(side) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.24, 1.32, 0);
+    const upperArm = box(0.09, 0.28, 0.09, shirt);
+    upperArm.position.y = -0.14;
+    const forearm = box(0.08, 0.26, 0.08, skin);
+    forearm.position.y = -0.4;
+    shoulder.add(upperArm, forearm);
+    shoulder.rotation.x = -side * 0.35;
+    shoulder.rotation.z = side * 0.12;
+    return shoulder;
+  }
+  group.add(leg(-1), leg(1), arm(-1), arm(1));
+  return group;
+}
+
+export function addJednoUstiMark(group, projector, sample, buildings) {
+  const hint = projector.toLocal(14.03711, 50.660869);
+  let ring = null;
+  for (const feature of buildings?.features || []) {
+    const tags = feature.properties || {};
+    if (String(tags.osmId) !== '95518293') continue;
+    const geom = feature.geometry;
+    if (geom?.type === 'Polygon') ring = geom.coordinates[0].map(([lon, lat]) => projector.toLocal(lon, lat));
+    else if (geom?.type === 'MultiPolygon') ring = geom.coordinates[0][0].map(([lon, lat]) => projector.toLocal(lon, lat));
+    break;
+  }
+  if (!ring || ring.length < 3) return null;
+  if (Math.hypot(ring[0][0] - ring[ring.length - 1][0], ring[0][1] - ring[ring.length - 1][1]) < 0.4) ring = ring.slice(0, -1);
+  let edge = null;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz) || 1;
+    const t = Math.max(0, Math.min(1, ((hint[0] - a[0]) * dx + (hint[1] - a[1]) * dz) / (len * len)));
+    const px = a[0] + dx * t;
+    const pz = a[1] + dz * t;
+    const d = Math.hypot(hint[0] - px, hint[1] - pz);
+    if (!edge || d < edge.d) edge = { a, b, dx, dz, len, d, px, pz };
+  }
+  const tx = edge.dx / edge.len;
+  const tz = edge.dz / edge.len;
+  let nx = tz;
+  let nz = -tx;
+  const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+  const cz = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+  const mx = (edge.a[0] + edge.b[0]) / 2;
+  const mz = (edge.a[1] + edge.b[1]) / 2;
+  if ((mx - cx) * nx + (mz - cz) * nz < 0) {
+    nx = -nx;
+    nz = -nz;
+  }
+  const along = 5.4;
+  const sx = mx + tx * along + nx * 0.16;
+  const sz = mz + tz * along + nz * 0.16;
+  const y = sample(sx, sz);
+  const yaw = Math.atan2(nx, nz);
+  const root = new THREE.Group();
+  root.name = 'jednousti';
+  const board = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.72, 1.18),
+    new THREE.MeshLambertMaterial({
+      map: typeof document === 'undefined' ? null : jednoUstiTexture(),
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+    }),
+  );
+  board.position.set(sx, y + 2.35, sz);
+  board.rotation.y = yaw + Math.PI;
+  const walker = makeLogoWalker();
+  walker.position.set(mx + tx * along + nx * 1.85, y, mz + tz * along + nz * 1.85);
+  walker.rotation.y = yaw;
+  board.userData.noShadow = true;
+  walker.userData.noShadow = true;
+  root.add(board, walker);
+  group.add(root);
+  root.userData.shot = { x: mx + tx * along + nx * 5.6, z: mz + tz * along + nz * 5.6, lookX: sx, lookZ: sz, y };
+  return root;
+}
+
 export function addVetruseMark(group, projector, sample) {
   const [x, z] = projector.toLocal(14.039608, 50.655013);
   if (!inside(projector, x, z)) return false;
