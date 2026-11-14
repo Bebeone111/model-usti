@@ -11,7 +11,7 @@ npm run dev
 
 Prohlížeč: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
-Ovládání: **WASD** chůze (výchozí 3,6 m/s, posuvník 1–16), **Shift** nebo tlačítko Rychle asi čtyřnásobek, **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši. Kolečko mění odstup kamery, **V** přepíná první osobu, **M** mapu, **E** kartu místa, **Tab** nápovědu. Jemnější terén při novém stažení: `npm run download -- --terrain-mpp=5` (výchozí je 8 m, nasazená mřížka zůstává u osmi metrů).
+Ovládání: **WASD** chůze (výchozí 14,4 m/s, dřívější Shift, posuvník 1–16), **Shift** nebo tlačítko Rychle asi dvojnásobek, **myš** rozhlížení (nejdřív kliknout do obrazu), **Esc** uvolní kurzor. Šipky otáčejí pohled i bez zamčené myši. Kolečko mění odstup kamery, **V** přepíná první osobu, **M** mapu, **E** kartu místa, **Tab** nápovědu. Jemnější terén při novém stažení: `npm run download -- --terrain-mpp=5` (výchozí je 8 m, nasazená mřížka zůstává u osmi metrů).
 
 HTML žádá indexaci (`robots` a `robots.txt`). Nasazený hosting k tomu někdy přidá hlavičku `x-robots-tag: noindex`; tu z projektu nejde přepsat.
 
@@ -40,6 +40,8 @@ Viz `public/data/zdroje.md` (adresy, licence, datum, přesný bbox).
 ## Co v1 záměrně neumí
 
 Jednoduché výšky (tag `height`, jinak RÚIAN podlaží × 3,1 m když jsou v datech, jinak `building:levels` × 3 m, jinak 9 m, u garáží a kůlen 3,2 m) a stejný počet řad oken. Dveře jsou na straně do ulice. Střechy jsou ploché nebo valbové, fasáda není fotografie adresy. Kolize jen proti půdorysu (průchodem pod domem neprojdete), bez aut a interiérů.
+
+Přechody (`highway=crossing` v OSM) se přichytí na střed nejbližší vozovky a zebra jde napříč jízdním pruhem. Když v OSM u bodu žádná vozovka neleží, přechod zůstane na původních souřadnicích; v současném bboxu se tak nestalo.
 
 ## Poznámky k v5 (co se přeskočilo)
 

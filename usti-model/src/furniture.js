@@ -1,5 +1,47 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { roadWidth } from './geom.js';
+
+const NOT_CARRIAGE = new Set(['footway', 'path', 'steps', 'pedestrian', 'cycleway', 'track', 'platform']);
+const SNAP_MAX = 16;
+
+function carriageSegs(highways, projector) {
+  const segs = [];
+  for (const feature of highways?.features || []) {
+    if (feature.geometry?.type !== 'LineString') continue;
+    const tags = feature.properties || {};
+    const key = String(tags.highway || '').replace(/_link$/, '');
+    if (!key || NOT_CARRIAGE.has(key)) continue;
+    const width = roadWidth(tags.highway);
+    if (!(width > 2)) continue;
+    const pts = feature.geometry.coordinates.map(([lon, lat]) => projector.toLocal(lon, lat));
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.6) continue;
+      segs.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], dx, dz, len, width });
+    }
+  }
+  return segs;
+}
+
+function snapToRoad(x, z, segs) {
+  let best = null;
+  for (const seg of segs) {
+    const t = Math.max(0, Math.min(1, ((x - seg.ax) * seg.dx + (z - seg.az) * seg.dz) / (seg.len * seg.len)));
+    const px = seg.ax + seg.dx * t;
+    const pz = seg.az + seg.dz * t;
+    const d = Math.hypot(x - px, z - pz);
+    if (d > SNAP_MAX) continue;
+    if (!best || d < best.d - 0.35 || (Math.abs(d - best.d) < 0.35 && seg.width > best.width)) {
+      best = { x: px, z: pz, d, tx: seg.dx / seg.len, tz: seg.dz / seg.len, width: seg.width };
+    }
+  }
+  return best;
+}
 
 function unit(x, z, salt) {
   let h = Math.imul((Math.round(x * 10) ^ Math.imul(Math.round(z * 10), 0x9e3779b1) ^ salt) >>> 0, 0x85ebca6b);
@@ -28,19 +70,21 @@ function instanced(geometry, material, points, place) {
 function stripeGeometry() {
   const pieces = [];
   for (let i = 0; i < 4; i++) {
-    const piece = new THREE.BoxGeometry(0.48, 0.04, 3.4);
+    const piece = new THREE.BoxGeometry(0.48, 0.07, 3.4);
     piece.translate((i - 1.5) * 0.95, 0, 0);
     pieces.push(piece);
   }
   return mergeGeometries(pieces, false);
 }
 
-export function addStreetFurniture(group, collection, projector, sample) {
+export function addStreetFurniture(group, collection, projector, sample, highways = null) {
   const benches = [];
   const lamps = [];
   const stops = [];
   const bins = [];
   const crossings = [];
+  const roads = carriageSegs(highways, projector);
+  let missedCrossings = 0;
   for (const feature of collection?.features || []) {
     if (feature.geometry?.type !== 'Point') continue;
     const [lon, lat] = feature.geometry.coordinates;
@@ -52,7 +96,23 @@ export function addStreetFurniture(group, collection, projector, sample) {
     else if (tags.highway === 'street_lamp') lamps.push({ ...point, name: tags.name || '' });
     else if (tags.highway === 'bus_stop') stops.push({ ...point, name: tags.name || '' });
     else if (tags.amenity === 'waste_basket') bins.push(point);
-    else if (tags.highway === 'crossing') crossings.push(point);
+    else if (tags.highway === 'crossing') {
+      const hit = snapToRoad(x, z, roads);
+      if (hit) {
+        // Align local X (stripe spacing) with the road; each bar is long in Z, across the carriageway.
+        const yaw = Math.atan2(hit.tx, hit.tz);
+        crossings.push({
+          x: hit.x,
+          z: hit.z,
+          y: sample(hit.x, hit.z),
+          rot: yaw,
+          scaleZ: Math.max(3.2, Math.min(12, hit.width * 0.92)) / 3.4,
+        });
+      } else {
+        missedCrossings += 1;
+        crossings.push({ ...point, rot: 0, scaleZ: 1 });
+      }
+    }
   }
   const square = projector.toLocal(14.040439, 50.660244);
   if (!lamps.some((lamp) => Math.hypot(lamp.x - square[0], lamp.z - square[1]) < 28)) {
@@ -98,9 +158,9 @@ export function addStreetFurniture(group, collection, projector, sample) {
       dummy.scale.set(1, 1, 1);
     }),
     instanced(stripeGeometry(), new THREE.MeshBasicMaterial({ color: 0xf7f4ee }), crossings, (dummy, point) => {
-      dummy.position.set(point.x, point.y + 0.18, point.z);
+      dummy.position.set(point.x, point.y + 0.34, point.z);
       dummy.rotation.set(0, point.rot, 0);
-      dummy.scale.set(1.15, 1, 1.15);
+      dummy.scale.set(1, 1, point.scaleZ || 1);
     }),
   ].filter(Boolean);
   for (const mesh of meshes) {
@@ -112,7 +172,15 @@ export function addStreetFurniture(group, collection, projector, sample) {
     lampMat,
     lamps,
     stops,
-    counts: { bench: benches.length, lamp: lamps.length, stop: stops.length, bin: bins.length, crossing: crossings.length },
+    counts: {
+      bench: benches.length,
+      lamp: lamps.length,
+      stop: stops.length,
+      bin: bins.length,
+      crossing: crossings.length,
+      crossingMissed: missedCrossings,
+    },
+    crossings,
     setDensity(factor) {
       for (const mesh of meshes) mesh.count = Math.max(0, Math.floor(mesh.userData.fullCount * factor));
     },
