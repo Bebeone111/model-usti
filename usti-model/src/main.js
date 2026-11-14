@@ -526,8 +526,8 @@ function frameQuayJoin() {
   const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
   const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
   if (!end) return false;
-  player.x = end.x + end.tx * 7;
-  player.z = end.z + end.tz * 7;
+  player.x = end.x + end.tx * 3.2;
+  player.z = end.z + end.tz * 3.2;
   player.yaw = Math.atan2(end.tx, end.tz);
   player.pitch = -0.2;
   player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));

@@ -844,14 +844,14 @@ export function seatRoadsToDecks(geometry, decks) {
     let nearest = null;
     for (const end of abutments) {
       const dist = Math.hypot(x - end.x, z - end.z);
-      if (dist > 12) continue;
+      if (dist > 22) continue;
       const across = Math.abs((x - end.x) * end.nx + (z - end.z) * end.nz);
-      if (across > end.half + 5.5) continue;
-      if (Math.abs(y - end.y) > 9) continue;
+      if (across > end.half + 6.5) continue;
+      if (Math.abs(y - end.y) > 10) continue;
       if (!nearest || dist < nearest.dist) nearest = { dist, end };
     }
     if (!nearest) continue;
-    const t = Math.min(1, nearest.dist / 11);
+    const t = Math.min(1, nearest.dist / 20);
     const ease = (1 - t) * (1 - t);
     pos.setY(i, nearest.end.y * ease + y * (1 - ease));
   }
