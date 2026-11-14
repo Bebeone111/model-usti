@@ -54,6 +54,7 @@ Přechody (`highway=crossing` v OSM) se přichytí na střed nejbližší vozovk
 - **Multiplayer** (blok F) a Mapillary / splat / GIS města (blok G) nejsou.
 - **Pohled z vody** po pevné cestě není. Lanovka na Větruši je z fallback osy, pokud Overpass aerialway v bboxu nic nevrátí.
 - **Vozovka na nábřeží** spojuje úseky Přístavní / Předmostí / Bílinské a nábřeží Labe i Bíliny, které OSM nechává s mezerami. Desky Mariánského mostu a mostu Beneše navazují na nábřeží ve stejné výšce. Terén se kvůli tomu neprohýbá, voda zůstává `usti-water-flat-v1`.
+- **JednoÚstí** je na fasádě domu u 50.660869 N, 14.037110 E jako vlastní geometrická značka (ne kopie ochranné známky). Před ní je stylizovaná postava se stejným rigem jako hráč, bílá košile, modré brýle na čele; bez tváře, jména a titulu, mimo dveře.
 
 ## Poznámky k v4 (co se přeskočilo)
 

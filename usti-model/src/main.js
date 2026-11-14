@@ -8,7 +8,7 @@ import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
-import { addStreetFurniture, addTrolleys } from './furniture.js';
+import { addJednoUstiMark, addStreetFurniture, addTrolleys } from './furniture.js';
 import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks, seatRoadsToDecks } from './bridges.js';
 import { addHeroBuildings } from './landmarks.js';
 import { addCableCar } from './cable.js';
@@ -748,6 +748,13 @@ function updateCamera() {
   if (shotMode && (shotLook === 'join' || shotLookQuery === 'join')) {
     camera.position.set(-(player.x - fx * 9), player.y + 6.4, player.z - fz * 9);
     camera.lookAt(-(player.x + fx * 10), player.y + 0.2, player.z + fz * 10);
+    return;
+  }
+  if (shotMode && (shotLook === 'logo' || shotLookQuery === 'logo')) {
+    camera.position.set(-player.x, player.y + 1.7, player.z);
+    const look = api.jednoUsti;
+    if (look) camera.lookAt(-look.lookX, look.y + 1.7, look.lookZ);
+    else camera.lookAt(-(player.x + fx * 6), player.y + 1.5, player.z + fz * 6);
     return;
   }
   if (shotMode && shotLook === 'marian') {
@@ -1623,6 +1630,8 @@ async function boot() {
   goalMark.userData.noShadow = true;
   view.add(goalMark);
   furniture = addStreetFurniture(view, loaded.furniture, projector, terrain.sample.bind(terrain), loaded.highways);
+  const jedno = addJednoUstiMark(view, projector, terrain.sample.bind(terrain), loaded.buildings);
+  if (jedno) api.jednoUsti = jedno.userData.shot;
   lampMat = furniture.lampMat;
   const bridges = addSignatureBridges(view, {
     highways: loaded.highways,
@@ -1724,9 +1733,15 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : '';
+    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : shotLookQuery === 'logo' ? 'logo' : '';
     if (shotLookQuery === 'join') {
       frameQuayJoin();
+      return true;
+    }
+    if (shotLookQuery === 'logo' && api.jednoUsti) {
+      const mark = api.jednoUsti;
+      placeNear(mark.x, mark.z, Math.atan2(-(mark.lookX - mark.x), -(mark.lookZ - mark.z)), -0.08);
+      shotLook = 'logo';
       return true;
     }
     const ok = placeNear(x, z, hashed[2], hashed[3]);
