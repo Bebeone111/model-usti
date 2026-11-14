@@ -13,7 +13,7 @@ import {
   startPreference,
   windowRows,
 } from './geom.js';
-import { buildRoadGeometry, drapeQuayChains, makeLineIndex } from './roads.js';
+import { buildRoadGeometry, makeLineIndex } from './roads.js';
 import { onDeck } from './bridges.js';
 
 const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
@@ -1022,6 +1022,7 @@ function pushRibbon(positions, ax, az, bx, bz, ox, oz, sample, lift, cap = Infin
 function addShores(group, rings, sample, box, waterY = 0.9) {
   const gravel = [];
   const wet = [];
+  const stone = [];
   for (const ring of rings) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i];
@@ -1043,6 +1044,20 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
         const oz = (-dx / len) * 8.5;
         pushRibbon(gravel, ax, az, bx, bz, ox, oz, sample, 0.12, waterY + 0.35);
         pushRibbon(wet, ax, az, bx, bz, (dz / len) * 2.8, (-dx / len) * 2.8, () => waterY, 0.02, waterY + 0.08);
+        const ix = ox * 1.15;
+        const iz = oz * 1.15;
+        const yLand0 = sample(ax + ix, az + iz);
+        const yLand1 = sample(bx + ix, bz + iz);
+        if (yLand0 - waterY > 2.4 || yLand1 - waterY > 2.4) {
+          stone.push(
+            ax, waterY + 0.12, az,
+            bx, waterY + 0.12, bz,
+            bx + ix, yLand1 + 0.06, bz + iz,
+            ax, waterY + 0.12, az,
+            bx + ix, yLand1 + 0.06, bz + iz,
+            ax + ix, yLand0 + 0.06, az + iz,
+          );
+        }
       }
     }
   }
@@ -1068,6 +1083,7 @@ function addShores(group, rings, sample, box, waterY = 0.9) {
   };
   make(gravel, 0xc6b59a, -2);
   make(wet, 0x5e6d66, -3);
+  make(stone, 0x7a746c, -3);
 }
 
 export async function buildCity(data, projector, hooks = {}) {
@@ -1289,14 +1305,6 @@ export async function buildCity(data, projector, hooks = {}) {
     });
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
-  if (roads.quayChains?.length) {
-    const quay = drapeQuayChains(roads.quayChains, sample, riverY);
-    if (quay.positions.length) asphaltParts.push({ positions: quay.positions, normals: quay.normals });
-    if (quay.centerlines.length) {
-      roads.centerlines.push(...quay.centerlines);
-      roads.quayCenterlines = quay.centerlines;
-    }
-  }
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1551,7 +1559,7 @@ export async function buildCity(data, projector, hooks = {}) {
     basins,
     heroes,
     centerlines: roads.centerlines,
-    quayCenterlines: roads.quayCenterlines || roads.centerlines,
+    quayChains: roads.quayChains || [],
   };
 }
 

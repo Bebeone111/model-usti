@@ -678,6 +678,7 @@ function junctionPatches(segments) {
       uniq.push(arm);
     }
     if (uniq.length < 2) continue;
+    if (uniq.every((arm) => quayFamily(segments[arm.i].name))) continue;
     let cx = 0;
     let cz = 0;
     for (const arm of uniq) {
@@ -856,10 +857,10 @@ export function buildRoadGeometry(features, projector) {
         if (asphalt.length > before) {
           centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
         }
+        const walkBefore = walk.length;
+        emitSides(chain, walk);
+        if (walk.length > walkBefore) sidewalkRuns += 1;
       }
-      const walkBefore = walk.length;
-      emitSides(chain, walk);
-      if (walk.length > walkBefore) sidewalkRuns += 1;
     } else if (chain.kind === 'pave') {
       emitRoad(chain, pave);
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
