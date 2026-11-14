@@ -1698,7 +1698,7 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    shotLook = '';
+    if (shotParams.get('look') !== 'down') shotLook = '';
     const ok = placeNear(x, z, hashed[2], hashed[3]);
     if (Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
       faceMarianDeck();
