@@ -2,7 +2,7 @@ import { clipPolyline, distPointSeg, roadWidth } from './geom.js';
 
 const JOIN_TOL = 2.4;
 const STITCH_MAX = 16;
-const QUAY_STITCH_MAX = 24;
+const QUAY_STITCH_MAX = 36;
 const SIDEWALK = 1.65;
 const QUAY_NAME = /nábřež|přístav|předmost|labsk|bílinsk|bilinsk|hraž/i;
 const HERO_BRIDGE = /Mariánský most|Most Dr\.?\s*E\.?\s*Beneše/i;
@@ -192,6 +192,10 @@ function quayName(name) {
   return QUAY_NAME.test(name || '');
 }
 
+function quayFamily(name) {
+  return quayName(name) || HERO_BRIDGE.test(name || '');
+}
+
 function stitchRoadGaps(segments) {
   const ends = [];
   segments.forEach((seg, i) => {
@@ -206,10 +210,10 @@ function stitchRoadGaps(segments) {
       const B = ends[b];
       if (A.i === B.i) continue;
       const same = Boolean(A.name && A.name === B.name);
-      const family = quayName(A.name) && quayName(B.name);
+      const family = quayFamily(A.name) && quayFamily(B.name);
       if (!same && !family) continue;
       const d = hypot(A.p, B.p);
-      const maxD = family || quayName(A.name) || quayName(B.name) ? QUAY_STITCH_MAX : STITCH_MAX;
+      const maxD = family || quayFamily(A.name) || quayFamily(B.name) ? QUAY_STITCH_MAX : STITCH_MAX;
       if (d <= JOIN_TOL + 0.15 || d > maxD) continue;
       const d1 = awayDir(segments[A.i], A.end);
       const d2 = awayDir(segments[B.i], B.end);
@@ -837,15 +841,21 @@ export function buildRoadGeometry(features, projector) {
   const pave = [];
   const labels = [];
   const centerlines = [];
+  const quayChains = [];
   let sidewalkRuns = 0;
   for (const raw of chains) {
     const simple = simplifyChain(raw);
     const chain = densifyChain(simple, 3);
     if (chain.kind === 'asphalt') {
-      const before = asphalt.length;
-      emitRoad(chain, asphalt);
-      if (asphalt.length > before) {
+      if (quayFamily(chain.name)) {
+        quayChains.push(simple);
         centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
+      } else {
+        const before = asphalt.length;
+        emitRoad(chain, asphalt);
+        if (asphalt.length > before) {
+          centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
+        }
       }
       const walkBefore = walk.length;
       emitSides(chain, walk);
@@ -870,6 +880,7 @@ export function buildRoadGeometry(features, projector) {
     pave,
     labels,
     centerlines,
+    quayChains,
     stats: {
       segments: segments.length,
       chains: chains.length,
@@ -877,6 +888,140 @@ export function buildRoadGeometry(features, projector) {
       sidewalkRuns,
     },
   };
+}
+
+function pushTri(positions, normals, a, b, c) {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  let nx = uy * vz - uz * vy;
+  let ny = uz * vx - ux * vz;
+  let nz = ux * vy - uy * vx;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  nx /= len;
+  ny /= len;
+  nz /= len;
+  if (ny < 0) {
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+    positions.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
+  } else {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  }
+  for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
+}
+
+function raiseQuayY(pts, sample, waterY) {
+  const floor = (waterY ?? 0.9) + 2.05;
+  const raw = pts.map((p) => Math.max(sample(p[0], p[1]) + 0.36, floor));
+  const acc = [0];
+  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + hypot(pts[i - 1], pts[i]));
+  return raw.map((y, i) => {
+    let high = y;
+    for (let j = 0; j < pts.length; j++) {
+      if (Math.abs(acc[j] - acc[i]) <= 14) high = Math.max(high, raw[j]);
+    }
+    return high;
+  });
+}
+
+function weldQuayChains(chains) {
+  const pool = chains
+    .filter((c) => c.pts?.length >= 2)
+    .map((c) => ({
+      pts: c.pts.map((p) => [p[0], p[1]]),
+      half: c.half.slice(),
+      left: (c.left || []).slice(),
+      right: (c.right || []).slice(),
+      name: c.name,
+      kind: 'asphalt',
+      closed: false,
+    }));
+  const used = new Set();
+  const out = [];
+  for (let i = 0; i < pool.length; i++) {
+    if (used.has(i)) continue;
+    used.add(i);
+    const cur = pool[i];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      let best = null;
+      for (let j = 0; j < pool.length; j++) {
+        if (used.has(j)) continue;
+        const other = pool[j];
+        const pairs = [
+          { mine: cur.pts[cur.pts.length - 1], theirs: other.pts[0], rev: false, front: false },
+          { mine: cur.pts[cur.pts.length - 1], theirs: other.pts[other.pts.length - 1], rev: true, front: false },
+          { mine: cur.pts[0], theirs: other.pts[other.pts.length - 1], rev: false, front: true },
+          { mine: cur.pts[0], theirs: other.pts[0], rev: true, front: true },
+        ];
+        for (const pair of pairs) {
+          const d = hypot(pair.mine, pair.theirs);
+          if (d < 0.8 || d > 40) continue;
+          if (!best || d < best.d) best = { j, d, ...pair, other };
+        }
+      }
+      if (!best) break;
+      used.add(best.j);
+      const addPts = best.rev ? [...best.other.pts].reverse() : best.other.pts.slice();
+      const addHalf = best.rev ? [...best.other.half].reverse() : best.other.half.slice();
+      const gapH = Math.max(4.2, cur.half[0] || 4.2, cur.half[cur.half.length - 1] || 4.2, addHalf[0] || 4.2);
+      if (best.front) {
+        cur.pts = addPts.concat(cur.pts);
+        cur.half = addHalf.concat([gapH], cur.half);
+      } else {
+        cur.pts = cur.pts.concat(addPts);
+        cur.half = cur.half.concat([gapH], addHalf);
+      }
+      grew = true;
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+export function drapeQuayChains(chains, sample, waterY) {
+  const positions = [];
+  const normals = [];
+  const centerlines = [];
+  for (const raw of weldQuayChains(chains)) {
+    const chain = densifyChain(
+      {
+        ...raw,
+        left: raw.half.map(() => false),
+        right: raw.half.map(() => false),
+        closed: false,
+      },
+      3.2,
+    );
+    if (chain.pts.length < 2) continue;
+    const ys = raiseQuayY(chain.pts, sample, waterY);
+    const n = chain.pts.length;
+    for (let i = 0; i < n - 1; i++) {
+      const a = chain.pts[i];
+      const b = chain.pts[i + 1];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = -dz / len;
+      const nz = dx / len;
+      const ha = Math.max(4.2, vertexHalf(chain.half, i, n, false));
+      const hb = Math.max(4.2, vertexHalf(chain.half, i + 1, n, false));
+      const a0 = [a[0] + nx * ha, ys[i], a[1] + nz * ha];
+      const a1 = [a[0] - nx * ha, ys[i], a[1] - nz * ha];
+      const b0 = [b[0] + nx * hb, ys[i + 1], b[1] + nz * hb];
+      const b1 = [b[0] - nx * hb, ys[i + 1], b[1] - nz * hb];
+      pushTri(positions, normals, a0, b0, b1);
+      pushTri(positions, normals, a0, b1, a1);
+    }
+    centerlines.push({ pts: chain.pts, half: chain.half, closed: false, ys });
+  }
+  return { positions, normals, centerlines };
 }
 
 export function makeLineIndex(lines, cell = 16) {

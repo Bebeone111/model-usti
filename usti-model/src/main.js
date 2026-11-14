@@ -522,6 +522,19 @@ function faceMarianDeck() {
   shotLook = 'marian';
 }
 
+function frameQuayJoin() {
+  const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
+  const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
+  if (!end) return false;
+  player.x = end.x + end.tx * 7;
+  player.z = end.z + end.tz * 7;
+  player.yaw = Math.atan2(end.tx, end.tz);
+  player.pitch = -0.2;
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
+  shotLook = 'join';
+  return true;
+}
+
 function goHome() {
   if (!api.start) return;
   placeNear(api.start.x, api.start.z, api.start.yaw, -0.4);
@@ -727,6 +740,11 @@ function updateCamera() {
   if (shotMode && (shotLook === 'down' || shotLookQuery === 'down')) {
     camera.position.set(-player.x, player.y + (Number.isFinite(shotAlt) && shotAlt > 4 ? shotAlt : 16), player.z);
     camera.lookAt(-player.x, player.y, player.z);
+    return;
+  }
+  if (shotMode && (shotLook === 'join' || shotLookQuery === 'join')) {
+    camera.position.set(-(player.x - fx * 9), player.y + 6.4, player.z - fz * 9);
+    camera.lookAt(-(player.x + fx * 10), player.y + 0.2, player.z + fz * 10);
     return;
   }
   if (shotMode && shotLook === 'marian') {
@@ -1610,7 +1628,7 @@ async function boot() {
     sample: terrain.sample.bind(terrain),
     waterY: city.waterY ?? 0.9,
     detail: true,
-    centerlines: city.centerlines,
+    centerlines: city.quayCenterlines || city.centerlines,
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
@@ -1703,7 +1721,11 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    shotLook = shotLookQuery === 'down' ? 'down' : '';
+    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : '';
+    if (shotLookQuery === 'join') {
+      frameQuayJoin();
+      return true;
+    }
     const ok = placeNear(x, z, hashed[2], hashed[3]);
     if (Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
       faceMarianDeck();

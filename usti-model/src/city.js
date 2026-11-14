@@ -13,7 +13,7 @@ import {
   startPreference,
   windowRows,
 } from './geom.js';
-import { buildRoadGeometry, makeLineIndex } from './roads.js';
+import { buildRoadGeometry, drapeQuayChains, makeLineIndex } from './roads.js';
 import { onDeck } from './bridges.js';
 
 const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
@@ -1289,6 +1289,14 @@ export async function buildCity(data, projector, hooks = {}) {
     });
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
+  if (roads.quayChains?.length) {
+    const quay = drapeQuayChains(roads.quayChains, sample, riverY);
+    if (quay.positions.length) asphaltParts.push({ positions: quay.positions, normals: quay.normals });
+    if (quay.centerlines.length) {
+      roads.centerlines.push(...quay.centerlines);
+      roads.quayCenterlines = quay.centerlines;
+    }
+  }
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1543,6 +1551,7 @@ export async function buildCity(data, projector, hooks = {}) {
     basins,
     heroes,
     centerlines: roads.centerlines,
+    quayCenterlines: roads.quayCenterlines || roads.centerlines,
   };
 }
 
