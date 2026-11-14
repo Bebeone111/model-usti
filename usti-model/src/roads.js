@@ -74,7 +74,10 @@ function prepareSegments(features, projector) {
     const roundabout = tags.junction === 'roundabout';
     let left = kind === 'asphalt' && sideOn(tags, 'left', key);
     let right = kind === 'asphalt' && sideOn(tags, 'right', key);
-    if (roundabout) left = false;
+    if (roundabout) {
+      left = false;
+      right = false;
+    }
     const name = String(tags.name || '').trim();
     for (const part of clipPolyline(local, ...box)) {
       if (part.length < 2) continue;
@@ -355,6 +358,7 @@ function joinSegments(segments) {
         nameLen: 0,
         kind: segments[seg].kind,
         closed: segments[seg].closed,
+        roundabout: Boolean(segments[seg].roundabout),
       };
       let guard = 0;
       while (seg != null && !visited.has(seg) && guard < segments.length + 2) {
@@ -369,6 +373,7 @@ function joinSegments(segments) {
             chain.nameLen = len;
           }
         }
+        if (src.roundabout) chain.roundabout = true;
         if (src.closed) break;
         const link = partner.get(`${seg}:${end ^ 1}`);
         if (!link) break;
@@ -832,11 +837,147 @@ function suppressSeparateSides(segments) {
   }
 }
 
+function dirOf(pts) {
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const len = hypot(a, b) || 1;
+  return [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+}
+
+function distPointPoly(x, z, pts) {
+  let best = Infinity;
+  let cx = pts[0][0];
+  let cz = pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    const ax = pts[i - 1][0];
+    const az = pts[i - 1][1];
+    const dx = pts[i][0] - ax;
+    const dz = pts[i][1] - az;
+    const len2 = dx * dx + dz * dz;
+    let t = len2 > 0 ? ((x - ax) * dx + (z - az) * dz) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const d = Math.hypot(x - px, z - pz);
+    if (d < best) {
+      best = d;
+      cx = px;
+      cz = pz;
+    }
+  }
+  return { d: best, x: cx, z: cz };
+}
+
+function absorbTwin(keep, drop, median, shift) {
+  let sx = 0;
+  let sz = 0;
+  let n = 0;
+  const step = Math.max(1, Math.floor(drop.pts.length / 8));
+  for (let i = 0; i < drop.pts.length; i += step) {
+    const hit = distPointPoly(drop.pts[i][0], drop.pts[i][1], keep.pts);
+    sx += drop.pts[i][0] - hit.x;
+    sz += drop.pts[i][1] - hit.z;
+    n += 1;
+  }
+  if (!n) return;
+  if (keep._baseHalf == null) keep._baseHalf = Math.max(...keep.half, 3);
+  keep._cover = Math.max(keep._cover || 0, median);
+  if (shift) {
+    const ox = (sx / n) * 0.5;
+    const oz = (sz / n) * 0.5;
+    keep.pts = keep.pts.map((p) => [p[0] + ox, p[1] + oz]);
+  }
+  const extra = median * 0.5 + Math.max(...drop.half, 0);
+  const half = Math.min(12, Math.max(...keep.half, extra, keep._baseHalf));
+  keep.half = keep.half.map(() => half);
+}
+
+function centroidOf(pts) {
+  let x = 0;
+  let z = 0;
+  for (const p of pts) {
+    x += p[0];
+    z += p[1];
+  }
+  return [x / pts.length, z / pts.length];
+}
+
+function diskRadiusOf(chain) {
+  if (!chain?.pts?.length) return 0;
+  const c = centroidOf(chain.pts);
+  let r = 0;
+  for (const p of chain.pts) r = Math.max(r, hypot(p, c));
+  return r + Math.max(...(chain.half || [0]), 0);
+}
+
+function collapseParallelAsphalt(chains) {
+  const asphalt = [];
+  const rest = [];
+  for (const chain of chains) {
+    if (chain.kind === 'asphalt' && !quayFamily(chain.name)) asphalt.push(chain);
+    else rest.push(chain);
+  }
+  asphalt.sort((a, b) => lengthOf(b.pts) - lengthOf(a.pts));
+  const keep = [];
+  for (const chain of asphalt) {
+    const d = dirOf(chain.pts);
+    const twin = keep.find((other) => {
+      if (chain.closed || other.closed) {
+        if (!chain.closed || !other.closed) return false;
+        return hypot(centroidOf(chain.pts), centroidOf(other.pts)) < 18;
+      }
+      const same = Boolean(chain.name && other.name && chain.name === other.name);
+      const o = dirOf(other.pts);
+      const parallel = Math.abs(d[0] * o[0] + d[1] * o[1]);
+      let acc = 0;
+      const step = Math.max(1, Math.floor(chain.pts.length / 8));
+      let n = 0;
+      for (let i = 0; i < chain.pts.length; i += step) {
+        acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], other.pts).d;
+        n += 1;
+      }
+      if (!n) return false;
+      const median = acc / n;
+      const cover = Math.max(...chain.half, 0) + Math.max(...other.half, 0) + 1.8;
+      if (median < cover) return true;
+      if (median < 6.8) return true;
+      if (parallel < 0.55) return false;
+      return same ? median < 11 : median < 8.4;
+    });
+    if (!twin) {
+      keep.push({
+        ...chain,
+        pts: chain.pts.map((p) => [p[0], p[1]]),
+        half: chain.half.slice(),
+        left: chain.left.slice(),
+        right: chain.right.slice(),
+        diskR: chain.closed || chain.roundabout ? diskRadiusOf(chain) : 0,
+      });
+      continue;
+    }
+    let acc = 0;
+    const step = Math.max(1, Math.floor(chain.pts.length / 8));
+    let n = 0;
+    for (let i = 0; i < chain.pts.length; i += step) {
+      acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], twin.pts).d;
+      n += 1;
+    }
+    if (chain.closed && twin.closed) {
+      twin.diskR = Math.max(twin.diskR || 0, diskRadiusOf(twin), diskRadiusOf(chain));
+      continue;
+    }
+    absorbTwin(twin, chain, n ? acc / n : 0, false);
+  }
+  return rest.concat(keep);
+}
+
 export function buildRoadGeometry(features, projector) {
   const segments = prepareSegments(features, projector);
   suppressSeparateSides(segments);
   stitchRoadGaps(segments);
-  const { chains, joins } = joinSegments(segments);
+  const joined = joinSegments(segments);
+  const chains = collapseParallelAsphalt(joined.chains);
+  const joins = joined.joins;
   const asphalt = [];
   const walk = [];
   const pave = [];
@@ -850,29 +991,31 @@ export function buildRoadGeometry(features, projector) {
     if (chain.kind === 'asphalt') {
       if (quayFamily(chain.name)) {
         quayChains.push(simple);
-        centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
+        centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed, quay: true });
       } else {
-        const before = asphalt.length;
-        emitRoad(chain, asphalt);
-        if (asphalt.length > before) {
-          centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
+        centerlines.push({
+          pts: chain.pts,
+          half: chain.half,
+          closed: chain.closed,
+          roundabout: Boolean(chain.roundabout),
+          diskR: chain.diskR || 0,
+        });
+        if (!chain.closed && !chain.roundabout) {
+          const walkBefore = walk.length;
+          emitSides(chain, walk);
+          if (walk.length > walkBefore) sidewalkRuns += 1;
         }
-        const walkBefore = walk.length;
-        emitSides(chain, walk);
-        if (walk.length > walkBefore) sidewalkRuns += 1;
       }
     } else if (chain.kind === 'pave') {
       emitRoad(chain, pave);
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
     } else {
-      const before = walk.length;
-      emitRoad(chain, walk);
-      if (walk.length > before) sidewalkRuns += 1;
+      // Independent footways drape as leftover slabs on the hillside.
+      // Sidewalks stay on emitSides along the carriageway.
     }
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }
   const patches = junctionPatches(segments);
-  asphalt.push(...patches.asphalt);
   walk.push(...patches.walk);
   pave.push(...patches.pave);
   return {
