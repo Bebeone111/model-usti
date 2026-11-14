@@ -832,11 +832,111 @@ function suppressSeparateSides(segments) {
   }
 }
 
+function dirOf(pts) {
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const len = hypot(a, b) || 1;
+  return [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+}
+
+function distPointPoly(x, z, pts) {
+  let best = Infinity;
+  let cx = pts[0][0];
+  let cz = pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    const ax = pts[i - 1][0];
+    const az = pts[i - 1][1];
+    const dx = pts[i][0] - ax;
+    const dz = pts[i][1] - az;
+    const len2 = dx * dx + dz * dz;
+    let t = len2 > 0 ? ((x - ax) * dx + (z - az) * dz) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const d = Math.hypot(x - px, z - pz);
+    if (d < best) {
+      best = d;
+      cx = px;
+      cz = pz;
+    }
+  }
+  return { d: best, x: cx, z: cz };
+}
+
+function absorbTwin(keep, drop, median) {
+  let sx = 0;
+  let sz = 0;
+  let n = 0;
+  const step = Math.max(1, Math.floor(drop.pts.length / 8));
+  for (let i = 0; i < drop.pts.length; i += step) {
+    const hit = distPointPoly(drop.pts[i][0], drop.pts[i][1], keep.pts);
+    sx += drop.pts[i][0] - hit.x;
+    sz += drop.pts[i][1] - hit.z;
+    n += 1;
+  }
+  if (!n) return;
+  if (keep._baseHalf == null) keep._baseHalf = Math.max(...keep.half, 3);
+  keep._cover = Math.max(keep._cover || 0, median);
+  const ox = (sx / n) * 0.5;
+  const oz = (sz / n) * 0.5;
+  keep.pts = keep.pts.map((p) => [p[0] + ox, p[1] + oz]);
+  const half = Math.min(8.4, keep._baseHalf + keep._cover * 0.5);
+  keep.half = keep.half.map(() => half);
+}
+
+function collapseParallelAsphalt(chains) {
+  const asphalt = [];
+  const rest = [];
+  for (const chain of chains) {
+    if (chain.kind === 'asphalt' && !quayFamily(chain.name) && !chain.closed) asphalt.push(chain);
+    else rest.push(chain);
+  }
+  asphalt.sort((a, b) => lengthOf(b.pts) - lengthOf(a.pts));
+  const keep = [];
+  for (const chain of asphalt) {
+    const d = dirOf(chain.pts);
+    const twin = keep.find((other) => {
+      if (chain.name && other.name && chain.name !== other.name) return false;
+      const o = dirOf(other.pts);
+      if (Math.abs(d[0] * o[0] + d[1] * o[1]) < 0.72) return false;
+      let acc = 0;
+      const step = Math.max(1, Math.floor(chain.pts.length / 8));
+      let n = 0;
+      for (let i = 0; i < chain.pts.length; i += step) {
+        acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], other.pts).d;
+        n += 1;
+      }
+      return n && acc / n < 11;
+    });
+    if (!twin) {
+      keep.push({
+        ...chain,
+        pts: chain.pts.map((p) => [p[0], p[1]]),
+        half: chain.half.slice(),
+        left: chain.left.slice(),
+        right: chain.right.slice(),
+      });
+      continue;
+    }
+    let acc = 0;
+    const step = Math.max(1, Math.floor(chain.pts.length / 8));
+    let n = 0;
+    for (let i = 0; i < chain.pts.length; i += step) {
+      acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], twin.pts).d;
+      n += 1;
+    }
+    absorbTwin(twin, chain, n ? acc / n : 0);
+  }
+  return rest.concat(keep);
+}
+
 export function buildRoadGeometry(features, projector) {
   const segments = prepareSegments(features, projector);
   suppressSeparateSides(segments);
   stitchRoadGaps(segments);
-  const { chains, joins } = joinSegments(segments);
+  const joined = joinSegments(segments);
+  const chains = collapseParallelAsphalt(joined.chains);
+  const joins = joined.joins;
   const asphalt = [];
   const walk = [];
   const pave = [];

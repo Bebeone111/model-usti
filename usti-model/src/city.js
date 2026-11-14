@@ -1673,10 +1673,52 @@ export function walkBlocked(collision, x, z, radius) {
   return false;
 }
 
+export function makeRoadHeightIndex(geometries, cell = 2.2) {
+  const grid = new Map();
+  for (const geometry of geometries || []) {
+    const pos = geometry?.attributes?.position;
+    if (!pos) continue;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+      const prev = grid.get(key);
+      if (prev == null || y > prev) grid.set(key, y);
+    }
+  }
+  return {
+    sample(x, z) {
+      const ix = Math.floor(x / cell);
+      const iz = Math.floor(z / cell);
+      let best = null;
+      let bestD = Infinity;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const y = grid.get(`${ix + dx},${iz + dz}`);
+          if (y == null) continue;
+          const cx = (ix + dx + 0.5) * cell;
+          const cz = (iz + dz + 0.5) * cell;
+          const d = Math.hypot(x - cx, z - cz);
+          if (d < bestD) {
+            bestD = d;
+            best = y;
+          }
+        }
+      }
+      return best;
+    },
+  };
+}
+
 export function walkHeight(collision, x, z, ground) {
   if (!collision) return ground;
+  let y = ground;
   const deck = onDeck(collision.decks, x, z, 0.45);
-  return deck ? Math.max(ground, deck.y) : ground;
+  if (deck) y = Math.max(y, deck.y);
+  const road = collision.roadHeight?.sample(x, z);
+  if (Number.isFinite(road) && road > y) y = road;
+  return y;
 }
 
 export function sinkGround() {
@@ -1715,11 +1757,11 @@ export function terraceGround(geometry, collision, basins) {
   geometry.computeVertexNormals();
 }
 
-export function liftSunkRoads(geometry, radius = 14, maxLift = 8) {
+export function liftSunkRoads(geometry, radius = 5.2, maxLift = 4) {
   if (!geometry?.attributes?.position) return;
   const pos = geometry.attributes.position;
   const n = pos.count;
-  const cell = 6;
+  const cell = 3;
   const grid = new Map();
   const key = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
   for (let i = 0; i < n; i++) {
@@ -1735,8 +1777,9 @@ export function liftSunkRoads(geometry, radius = 14, maxLift = 8) {
     let high = y;
     const ix = Math.floor(x / cell);
     const iz = Math.floor(z / cell);
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
+    const reach = Math.ceil(radius / cell);
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dz = -reach; dz <= reach; dz++) {
         for (const j of grid.get(`${ix + dx},${iz + dz}`) || []) {
           const d = Math.hypot(x - pos.getX(j), z - pos.getZ(j));
           if (d > radius) continue;
@@ -1744,8 +1787,7 @@ export function liftSunkRoads(geometry, radius = 14, maxLift = 8) {
         }
       }
     }
-    const lift = high - y;
-    next[i] = lift > 0.7 && lift < maxLift ? y + lift * 0.92 : y;
+    next[i] = high - y > maxLift ? y : high;
   }
   for (let i = 0; i < n; i++) pos.setY(i, next[i]);
   pos.needsUpdate = true;

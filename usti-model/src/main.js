@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, liftSunkRoads, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, liftSunkRoads, makeNameSprite, makeRoadHeightIndex, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1199,7 +1199,7 @@ function reveal() {
   } else {
     intro = shotMode ? 0 : 1;
     camBack = shotMode ? 6.4 : 16.5;
-    if (shotMode) setThirdPerson(false);
+    if (shotMode) setThirdPerson(shotParams.get('tp') === '1');
     if (!shotMode) player.pitch = -0.7;
   }
 }
@@ -1668,11 +1668,12 @@ async function boot() {
   collision.rails = bridges.rails;
   collision.quayChains = city.quayChains || [];
   collision.waterY = city.waterY ?? 0.9;
-  placeQuayRibbon(view, city.quayChains, bridges.decks, terrain.sample.bind(terrain), city.waterY ?? 0.9);
+  const quayRibbon = placeQuayRibbon(view, city.quayChains, bridges.decks, terrain.sample.bind(terrain), city.waterY ?? 0.9);
   if (asphalt?.geometry) {
     seatRoadsToDecks(asphalt.geometry, bridges.decks);
     liftSunkRoads(asphalt.geometry);
   }
+  collision.roadHeight = makeRoadHeightIndex([asphalt?.geometry, quayRibbon?.mesh?.geometry].filter(Boolean));
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {
