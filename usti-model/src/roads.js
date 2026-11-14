@@ -922,22 +922,9 @@ function collapseParallelAsphalt(chains) {
   for (const chain of asphalt) {
     const d = dirOf(chain.pts);
     const twin = keep.find((other) => {
-      if (chain.closed || other.closed || chain.roundabout || other.roundabout) {
-        const aLoop = chain.closed || chain.roundabout;
-        const bLoop = other.closed || other.roundabout;
-        if (aLoop && bLoop) return hypot(centroidOf(chain.pts), centroidOf(other.pts)) < 28;
-        const loop = aLoop ? chain : other;
-        const stub = aLoop ? other : chain;
-        const c = centroidOf(loop.pts);
-        const r = Math.max(diskRadiusOf(loop), 10);
-        let n = 0;
-        let hit = 0;
-        const step = Math.max(1, Math.floor(stub.pts.length / 8));
-        for (let i = 0; i < stub.pts.length; i += step) {
-          n += 1;
-          if (hypot(stub.pts[i], c) < r + 6) hit += 1;
-        }
-        return n > 0 && hit / n > 0.6;
+      if (chain.closed || other.closed) {
+        if (!chain.closed || !other.closed) return false;
+        return hypot(centroidOf(chain.pts), centroidOf(other.pts)) < 18;
       }
       const same = Boolean(chain.name && other.name && chain.name === other.name);
       const o = dirOf(other.pts);
@@ -975,19 +962,8 @@ function collapseParallelAsphalt(chains) {
       acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], twin.pts).d;
       n += 1;
     }
-    if (twin.closed || twin.roundabout || chain.closed || chain.roundabout) {
-      const loop = twin.closed || twin.roundabout ? twin : chain;
-      const other = loop === twin ? chain : twin;
-      loop.closed = true;
-      loop.roundabout = true;
-      loop.diskR = Math.max(loop.diskR || 0, diskRadiusOf(loop), diskRadiusOf(other));
-      if (loop !== twin) {
-        twin.pts = loop.pts;
-        twin.half = loop.half;
-        twin.closed = true;
-        twin.roundabout = true;
-        twin.diskR = loop.diskR;
-      }
+    if (chain.closed && twin.closed) {
+      twin.diskR = Math.max(twin.diskR || 0, diskRadiusOf(twin), diskRadiusOf(chain));
       continue;
     }
     absorbTwin(twin, chain, n ? acc / n : 0, false);
@@ -1034,9 +1010,8 @@ export function buildRoadGeometry(features, projector) {
       emitRoad(chain, pave);
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
     } else {
-      const before = walk.length;
-      emitRoad(chain, walk);
-      if (walk.length > before) sidewalkRuns += 1;
+      // Independent footways drape as leftover slabs on the hillside.
+      // Sidewalks stay on emitSides along the carriageway.
     }
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }
