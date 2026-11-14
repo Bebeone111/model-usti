@@ -756,52 +756,170 @@ function pushRoadTri(positions, normals, a, b, c) {
   for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
 }
 
+function weldRoadHeights(tris, radius = 5.6, maxLift = 2.8) {
+  const verts = [];
+  for (const tri of tris) verts.push(tri[0], tri[1], tri[2]);
+  const cell = 3;
+  const grid = new Map();
+  const keyOf = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  verts.forEach((v, i) => {
+    const k = keyOf(v[0], v[2]);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  });
+  const reach = Math.ceil(radius / cell);
+  const next = new Float32Array(verts.length);
+  for (let i = 0; i < verts.length; i++) {
+    const x = verts[i][0];
+    const y = verts[i][1];
+    const z = verts[i][2];
+    let high = y;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dz = -reach; dz <= reach; dz++) {
+        for (const j of grid.get(`${ix + dx},${iz + dz}`) || []) {
+          const o = verts[j];
+          if (Math.hypot(x - o[0], z - o[2]) > radius) continue;
+          if (o[1] > high) high = o[1];
+        }
+      }
+    }
+    next[i] = high - y > maxLift ? y : high;
+  }
+  for (let i = 0; i < verts.length; i++) verts[i][1] = next[i];
+}
+
+function noteRoadHeight(grid, cell, x, z, y) {
+  const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  const prev = grid.get(key);
+  if (prev == null || y > prev) grid.set(key, y);
+}
+
+function ribbonHalfAt(line, i) {
+  const h = line.half;
+  if (!h?.length) return 3.4;
+  if (i <= 0) return h[0];
+  if (i >= h.length) return h[h.length - 1];
+  return Math.max(h[Math.min(i, h.length - 1)], h[Math.min(i - 1, h.length - 1)]);
+}
+
+function smoothRibbonY(pts, sample, lift) {
+  const n = pts.length;
+  const raw = pts.map((p) => sample(p[0], p[1]) + lift);
+  const acc = [0];
+  for (let i = 1; i < n; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  return raw.map((y, i) => {
+    let high = y;
+    for (let j = 0; j < n; j++) {
+      if (Math.abs(acc[j] - acc[i]) <= 8) high = Math.max(high, raw[j]);
+    }
+    return high;
+  });
+}
+
 function drapeAsphaltRibbons(lines, sample, lift, parts) {
   const positions = [];
   const normals = [];
+  const tris = [];
+  const heightGrid = new Map();
+  const heightCell = 3;
+  const disks = [];
   for (const line of lines || []) {
-    if (line.quay || line.closed || !line.pts || line.pts.length < 2) continue;
+    if (line.quay || !line.pts || line.pts.length < 5 || !line.closed) continue;
     const pts = line.pts;
     const n = pts.length;
-    const raw = pts.map((p) => sample(p[0], p[1]) + lift);
-    const acc = [0];
-    for (let i = 1; i < n; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    const ys = raw.map((y, i) => {
-      let high = y;
-      for (let j = 0; j < n; j++) {
-        if (Math.abs(acc[j] - acc[i]) <= 14) high = Math.max(high, raw[j]);
+    const ys = smoothRibbonY(pts, sample, lift);
+    const c = [0, 0];
+    for (const p of pts) {
+      c[0] += p[0];
+      c[1] += p[1];
+    }
+    c[0] /= n;
+    c[1] /= n;
+    let r = line.diskR || 0;
+    for (let i = 0; i < n; i++) {
+      r = Math.max(r, Math.hypot(pts[i][0] - c[0], pts[i][1] - c[1]) + ribbonHalfAt(line, i));
+    }
+    if (!(r > 7 && r < 40)) continue;
+    disks.push({ x: c[0], z: c[1], r: Math.min(r, 28), y: Math.max(...ys), pts, line });
+  }
+  for (const disk of disks) {
+    const rings = 5;
+    const segs = 36;
+    const pts = [];
+    const ys = [];
+    for (let ring = 0; ring <= rings; ring++) {
+      const rad = (disk.r * ring) / rings;
+      const row = [];
+      const rowY = [];
+      for (let i = 0; i < segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        const x = disk.x + Math.cos(a) * rad;
+        const z = disk.z + Math.sin(a) * rad;
+        row.push([x, z]);
+        rowY.push(sample(x, z) + lift);
       }
-      return high;
-    });
-    const halfAt = (i) => {
-      const h = line.half;
-      if (!h?.length) return 3.4;
-      if (i <= 0) return h[0];
-      if (i >= h.length) return h[h.length - 1];
-      return Math.max(h[Math.min(i, h.length - 1)], h[Math.min(i - 1, h.length - 1)]);
-    };
+      pts.push(row);
+      ys.push(rowY);
+    }
+    for (let ring = 0; ring < rings; ring++) {
+      for (let i = 0; i < segs; i++) {
+        const j = (i + 1) % segs;
+        const a = [pts[ring][i][0], ys[ring][i], pts[ring][i][1]];
+        const b = [pts[ring][j][0], ys[ring][j], pts[ring][j][1]];
+        const c = [pts[ring + 1][j][0], ys[ring + 1][j], pts[ring + 1][j][1]];
+        const d = [pts[ring + 1][i][0], ys[ring + 1][i], pts[ring + 1][i][1]];
+        tris.push([a, b, c], [a.slice(), c.slice(), d]);
+      }
+    }
+  }
+  for (const line of lines || []) {
+    if (line.quay || !line.pts || line.pts.length < 2) continue;
+    if ((line.closed || line.roundabout) && disks.some((d) => d.line === line)) continue;
+    const pts = line.pts;
+    const n = pts.length;
+    const ys = smoothRibbonY(pts, sample, lift);
+    if (line.closed) {
+      const ringY = Math.max(...ys);
+      for (let i = 0; i < n; i++) ys[i] = ringY;
+    }
     const segs = line.closed ? n : n - 1;
     for (let i = 0; i < segs; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % n];
+      const inside = disks.find((disk) => {
+        const da = Math.hypot(a[0] - disk.x, a[1] - disk.z);
+        const db = Math.hypot(b[0] - disk.x, b[1] - disk.z);
+        return da < disk.r - 1.2 && db < disk.r - 1.2;
+      });
+      if (inside) continue;
       const dx = b[0] - a[0];
       const dz = b[1] - a[1];
       const len = Math.hypot(dx, dz) || 1;
       const nx = -dz / len;
       const nz = dx / len;
-      const ha = Math.max(2.4, halfAt(i));
-      const hb = Math.max(2.4, halfAt((i + 1) % n));
+      const ha = Math.max(2.4, ribbonHalfAt(line, i));
+      const hb = Math.max(2.4, ribbonHalfAt(line, (i + 1) % n));
       const ya = ys[i];
       const yb = ys[(i + 1) % n];
       const a0 = [a[0] + nx * ha, ya, a[1] + nz * ha];
       const a1 = [a[0] - nx * ha, ya, a[1] - nz * ha];
       const b0 = [b[0] + nx * hb, yb, b[1] + nz * hb];
       const b1 = [b[0] - nx * hb, yb, b[1] - nz * hb];
-      pushRoadTri(positions, normals, a0, b0, b1);
-      pushRoadTri(positions, normals, a0, b1, a1);
+      tris.push([a0, b0, b1], [a0.slice(), b1.slice(), a1]);
     }
   }
+  weldRoadHeights(tris);
+  for (const tri of tris) {
+    pushRoadTri(positions, normals, tri[0], tri[1], tri[2]);
+    const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
+    const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
+    const my = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+    noteRoadHeight(heightGrid, heightCell, mx, mz, my);
+  }
   if (positions.length) parts.push({ positions, normals });
+  return { grid: heightGrid, cell: heightCell, disks };
 }
 
 function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
@@ -865,6 +983,7 @@ function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
     nx /= len;
     ny /= len;
     nz /= len;
+    if (ny < 0.42) continue;
     positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
   }
@@ -1357,9 +1476,16 @@ export async function buildCity(data, projector, hooks = {}) {
         && z <= block.maxZ
         && pointInRing(x, z, block.outer),
     );
-  drapeAsphaltRibbons(roads.centerlines, sample, 0.28, asphaltParts);
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, null, true);
-  drapeFlat(roads.walk, sample, 0.14, walkParts, roadBlocked);
+  const asphaltHeights = drapeAsphaltRibbons(roads.centerlines, sample, 0.28, asphaltParts);
+  const skipWalk = (x, z) => {
+    if (roadBlocked(x, z)) return true;
+    for (const disk of asphaltHeights?.disks || []) {
+      if (Math.hypot(x - disk.x, z - disk.z) < disk.r + 0.8) return true;
+    }
+    const hit = carriageways.query(x, z, 14);
+    return Boolean(hit && hit.dist < (hit.half || 3) + 0.45);
+  };
+  drapeFlat(roads.walk, sample, 0.14, walkParts, skipWalk);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1848,7 +1974,7 @@ export function terraceGround(geometry, collision, basins) {
   geometry.computeVertexNormals();
 }
 
-export function liftSunkRoads(geometry, radius = 6.4, maxLift = 12) {
+export function liftSunkRoads(geometry, radius = 5.8, maxLift = 3.2) {
   if (!geometry?.attributes?.position) return;
   const pos = geometry.attributes.position;
   const n = pos.count;

@@ -74,7 +74,10 @@ function prepareSegments(features, projector) {
     const roundabout = tags.junction === 'roundabout';
     let left = kind === 'asphalt' && sideOn(tags, 'left', key);
     let right = kind === 'asphalt' && sideOn(tags, 'right', key);
-    if (roundabout) left = false;
+    if (roundabout) {
+      left = false;
+      right = false;
+    }
     const name = String(tags.name || '').trim();
     for (const part of clipPolyline(local, ...box)) {
       if (part.length < 2) continue;
@@ -355,6 +358,7 @@ function joinSegments(segments) {
         nameLen: 0,
         kind: segments[seg].kind,
         closed: segments[seg].closed,
+        roundabout: Boolean(segments[seg].roundabout),
       };
       let guard = 0;
       while (seg != null && !visited.has(seg) && guard < segments.length + 2) {
@@ -369,6 +373,7 @@ function joinSegments(segments) {
             chain.nameLen = len;
           }
         }
+        if (src.roundabout) chain.roundabout = true;
         if (src.closed) break;
         const link = partner.get(`${seg}:${end ^ 1}`);
         if (!link) break;
@@ -882,15 +887,34 @@ function absorbTwin(keep, drop, median, shift) {
     const oz = (sz / n) * 0.5;
     keep.pts = keep.pts.map((p) => [p[0] + ox, p[1] + oz]);
   }
-  const half = Math.min(8.4, keep._baseHalf + keep._cover * 0.5);
+  const extra = median * 0.5 + Math.max(...drop.half, 0);
+  const half = Math.min(12, Math.max(...keep.half, extra, keep._baseHalf));
   keep.half = keep.half.map(() => half);
+}
+
+function centroidOf(pts) {
+  let x = 0;
+  let z = 0;
+  for (const p of pts) {
+    x += p[0];
+    z += p[1];
+  }
+  return [x / pts.length, z / pts.length];
+}
+
+function diskRadiusOf(chain) {
+  if (!chain?.pts?.length) return 0;
+  const c = centroidOf(chain.pts);
+  let r = 0;
+  for (const p of chain.pts) r = Math.max(r, hypot(p, c));
+  return r + Math.max(...(chain.half || [0]), 0);
 }
 
 function collapseParallelAsphalt(chains) {
   const asphalt = [];
   const rest = [];
   for (const chain of chains) {
-    if (chain.kind === 'asphalt' && !quayFamily(chain.name) && !chain.closed) asphalt.push(chain);
+    if (chain.kind === 'asphalt' && !quayFamily(chain.name)) asphalt.push(chain);
     else rest.push(chain);
   }
   asphalt.sort((a, b) => lengthOf(b.pts) - lengthOf(a.pts));
@@ -898,6 +922,23 @@ function collapseParallelAsphalt(chains) {
   for (const chain of asphalt) {
     const d = dirOf(chain.pts);
     const twin = keep.find((other) => {
+      if (chain.closed || other.closed || chain.roundabout || other.roundabout) {
+        const aLoop = chain.closed || chain.roundabout;
+        const bLoop = other.closed || other.roundabout;
+        if (aLoop && bLoop) return hypot(centroidOf(chain.pts), centroidOf(other.pts)) < 28;
+        const loop = aLoop ? chain : other;
+        const stub = aLoop ? other : chain;
+        const c = centroidOf(loop.pts);
+        const r = Math.max(diskRadiusOf(loop), 10);
+        let n = 0;
+        let hit = 0;
+        const step = Math.max(1, Math.floor(stub.pts.length / 8));
+        for (let i = 0; i < stub.pts.length; i += step) {
+          n += 1;
+          if (hypot(stub.pts[i], c) < r + 6) hit += 1;
+        }
+        return n > 0 && hit / n > 0.6;
+      }
       const same = Boolean(chain.name && other.name && chain.name === other.name);
       const o = dirOf(other.pts);
       const parallel = Math.abs(d[0] * o[0] + d[1] * o[1]);
@@ -910,6 +951,8 @@ function collapseParallelAsphalt(chains) {
       }
       if (!n) return false;
       const median = acc / n;
+      const cover = Math.max(...chain.half, 0) + Math.max(...other.half, 0) + 1.8;
+      if (median < cover) return true;
       if (median < 6.8) return true;
       if (parallel < 0.55) return false;
       return same ? median < 11 : median < 8.4;
@@ -921,6 +964,7 @@ function collapseParallelAsphalt(chains) {
         half: chain.half.slice(),
         left: chain.left.slice(),
         right: chain.right.slice(),
+        diskR: chain.closed || chain.roundabout ? diskRadiusOf(chain) : 0,
       });
       continue;
     }
@@ -931,8 +975,22 @@ function collapseParallelAsphalt(chains) {
       acc += distPointPoly(chain.pts[i][0], chain.pts[i][1], twin.pts).d;
       n += 1;
     }
-    const same = Boolean(chain.name && twin.name && chain.name === twin.name);
-    absorbTwin(twin, chain, n ? acc / n : 0, same);
+    if (twin.closed || twin.roundabout || chain.closed || chain.roundabout) {
+      const loop = twin.closed || twin.roundabout ? twin : chain;
+      const other = loop === twin ? chain : twin;
+      loop.closed = true;
+      loop.roundabout = true;
+      loop.diskR = Math.max(loop.diskR || 0, diskRadiusOf(loop), diskRadiusOf(other));
+      if (loop !== twin) {
+        twin.pts = loop.pts;
+        twin.half = loop.half;
+        twin.closed = true;
+        twin.roundabout = true;
+        twin.diskR = loop.diskR;
+      }
+      continue;
+    }
+    absorbTwin(twin, chain, n ? acc / n : 0, false);
   }
   return rest.concat(keep);
 }
@@ -959,11 +1017,18 @@ export function buildRoadGeometry(features, projector) {
         quayChains.push(simple);
         centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed, quay: true });
       } else {
-        centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
-        if (chain.closed) emitRoad(chain, asphalt);
-        const walkBefore = walk.length;
-        emitSides(chain, walk);
-        if (walk.length > walkBefore) sidewalkRuns += 1;
+        centerlines.push({
+          pts: chain.pts,
+          half: chain.half,
+          closed: chain.closed,
+          roundabout: Boolean(chain.roundabout),
+          diskR: chain.diskR || 0,
+        });
+        if (!chain.closed && !chain.roundabout) {
+          const walkBefore = walk.length;
+          emitSides(chain, walk);
+          if (walk.length > walkBefore) sidewalkRuns += 1;
+        }
       }
     } else if (chain.kind === 'pave') {
       emitRoad(chain, pave);
@@ -976,7 +1041,6 @@ export function buildRoadGeometry(features, projector) {
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }
   const patches = junctionPatches(segments);
-  asphalt.push(...patches.asphalt);
   walk.push(...patches.walk);
   pave.push(...patches.pave);
   return {
