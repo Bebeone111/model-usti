@@ -764,15 +764,51 @@ function ribbonHalfAt(line, i) {
   return Math.max(h[Math.min(i, h.length - 1)], h[Math.min(i - 1, h.length - 1)]);
 }
 
-function drapeAsphaltRibbons(lines, sample, lift, parts) {
+function waterTest(water, projector, box, sample) {
+  const rings = [];
+  for (const feature of water.features || []) {
+    eachPolygon(feature.geometry, (coords) => {
+      if (!coords?.[0]) return;
+      const outer = orient(clipPolygon(projectRing(coords[0], projector), ...box), true);
+      if (!outer) return;
+      const closed = outer.concat([outer[0]]);
+      const edge = densify(closed, 12);
+      let y = Infinity;
+      for (const p of edge) y = Math.min(y, sample(p[0], p[1]));
+      rings.push({ outer: closed, y: Number.isFinite(y) ? y : 0.9, ...polygonBounds([closed]) });
+    });
+  }
+  const wet = (x, z) => {
+    for (const r of rings) {
+      if (x < r.minX || x > r.maxX || z < r.minZ || z > r.maxZ) continue;
+      if (!pointInRing(x, z, r.outer)) continue;
+      if (sample(x, z) <= r.y + 0.08) return true;
+    }
+    return false;
+  };
+  const nearShore = (x, z) => {
+    for (const r of rings) {
+      if (x < r.minX - 40 || x > r.maxX + 40 || z < r.minZ - 40 || z > r.maxZ + 40) continue;
+      if (distToClosedRing(x, z, r.outer) < 40) return true;
+    }
+    return false;
+  };
+  return { wet, nearShore };
+}
+
+function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
   const cell = 1.2;
   const covered = new Map();
   const disks = [];
+  const wet = waterMask?.wet || (() => false);
+  const nearShore = waterMask?.nearShore || (() => false);
+  const wall = typeof blocked === 'function' ? blocked : () => false;
   const mark = (ix, iz) => {
     const key = `${ix},${iz}`;
     if (covered.has(key)) return;
     const x = (ix + 0.5) * cell;
     const z = (iz + 0.5) * cell;
+    if (wet(x, z) || wall(x, z)) return;
     covered.set(key, { ix, iz, x, z, y: sample(x, z) + lift });
   };
   const markDisk = (cx, cz, r) => {
@@ -829,6 +865,58 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
     for (let i = 0; i < segs; i++) {
       markSeg(pts[i], pts[(i + 1) % n], ribbonHalfAt(line, i));
     }
+  }
+  const medBin = 12;
+  const medBins = new Map();
+  const medSamples = [];
+  let medId = 0;
+  for (const line of lines || []) {
+    if (line.quay || !line.pts || line.pts.length < 2) continue;
+    medId += 1;
+    const pts = line.pts;
+    const n = pts.length;
+    const segs = line.closed ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const steps = Math.max(1, Math.ceil(len / 7));
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        const rec = {
+          x: a[0] + (b[0] - a[0]) * t,
+          z: a[1] + (b[1] - a[1]) * t,
+          dx: b[0] - a[0],
+          dz: b[1] - a[1],
+          id: medId,
+        };
+        medSamples.push(rec);
+        const key = `${Math.floor(rec.x / medBin)},${Math.floor(rec.z / medBin)}`;
+        if (!medBins.has(key)) medBins.set(key, []);
+        medBins.get(key).push(rec);
+      }
+    }
+  }
+  for (const a of medSamples) {
+    const ix = Math.floor(a.x / medBin);
+    const iz = Math.floor(a.z / medBin);
+    let best = null;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const list = medBins.get(`${ix + dx},${iz + dz}`);
+        if (!list) continue;
+        for (const b of list) {
+          if (b.id === a.id) continue;
+          const d = Math.hypot(a.x - b.x, a.z - b.z);
+          if (d < 5.5 || d > 16) continue;
+          const la = Math.hypot(a.dx, a.dz) || 1;
+          const lb = Math.hypot(b.dx, b.dz) || 1;
+          if (Math.abs((a.dx * b.dx + a.dz * b.dz) / (la * lb)) < 0.7) continue;
+          if (!best || d < best.d) best = { b, d };
+        }
+      }
+    }
+    if (best) markSeg([a.x, a.z], [best.b.x, best.b.z], Math.min(8, best.d * 0.55));
   }
   const roundPts = [];
   for (const line of lines || []) {
@@ -931,6 +1019,136 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
     }
   }
   dilate();
+  const seenEmpty = new Set();
+  const holeDirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const maxHole = 1400;
+  const floodHole = (sx, sz) => {
+    const start = `${sx},${sz}`;
+    if (covered.has(start) || seenEmpty.has(start)) return;
+    const x0 = (sx + 0.5) * cell;
+    const z0 = (sz + 0.5) * cell;
+    if (wet(x0, z0) || wall(x0, z0)) return;
+    const q = [[sx, sz]];
+    seenEmpty.add(start);
+    const region = [];
+    let open = false;
+    while (q.length) {
+      const [ix, iz] = q.pop();
+      region.push([ix, iz]);
+      if (region.length > maxHole) {
+        open = true;
+        break;
+      }
+      for (const [dx, dz] of holeDirs) {
+        const nix = ix + dx;
+        const niz = iz + dz;
+        const key = `${nix},${niz}`;
+        if (covered.has(key) || seenEmpty.has(key)) continue;
+        const x = (nix + 0.5) * cell;
+        const z = (niz + 0.5) * cell;
+        if (wet(x, z)) {
+          open = true;
+          continue;
+        }
+        if (wall(x, z)) continue;
+        seenEmpty.add(key);
+        q.push([nix, niz]);
+      }
+    }
+    if (open || region.length > maxHole) return;
+    for (const [ix, iz] of region) mark(ix, iz);
+  };
+  for (const rec of [...covered.values()]) {
+    for (const [dx, dz] of holeDirs) floodHole(rec.ix + dx, rec.iz + dz);
+  }
+  const span = 28;
+  const cols = new Map();
+  const rows = new Map();
+  for (const rec of covered.values()) {
+    if (!cols.has(rec.ix)) cols.set(rec.ix, []);
+    cols.get(rec.ix).push(rec.iz);
+    if (!rows.has(rec.iz)) rows.set(rec.iz, []);
+    rows.get(rec.iz).push(rec.ix);
+  }
+  const fillGaps = (major, lists, alongRow) => {
+    for (const [a, raw] of lists) {
+      const list = raw.slice().sort((x, y) => x - y);
+      for (let i = 1; i < list.length; i++) {
+        const gap = list[i] - list[i - 1];
+        if (gap <= 1 || gap > span + 1) continue;
+        for (let b = list[i - 1] + 1; b < list[i]; b++) {
+          if (alongRow) mark(b, a);
+          else mark(a, b);
+        }
+      }
+    }
+  };
+  fillGaps(0, cols, false);
+  fillGaps(0, rows, true);
+  const shoreKeys = new Set();
+  for (const rec of covered.values()) {
+    if (nearShore(rec.x, rec.z)) shoreKeys.add(`${rec.ix},${rec.iz}`);
+  }
+  for (let step = 0; step < 26; step++) {
+    const seed = [...shoreKeys];
+    for (const key of seed) {
+      const rec = covered.get(key);
+      if (!rec) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (!dx && !dz) continue;
+          const ix = rec.ix + dx;
+          const iz = rec.iz + dz;
+          const next = `${ix},${iz}`;
+          mark(ix, iz);
+          if (covered.has(next)) shoreKeys.add(next);
+        }
+      }
+    }
+  }
+  const hullBin = 32;
+  const hullGroups = new Map();
+  for (const key of shoreKeys) {
+    const rec = covered.get(key);
+    if (!rec) continue;
+    const gk = `${Math.floor(rec.x / hullBin)},${Math.floor(rec.z / hullBin)}`;
+    if (!hullGroups.has(gk)) hullGroups.set(gk, []);
+    hullGroups.get(gk).push(rec);
+  }
+  const cross2 = (o, a, b) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+  for (const pts of hullGroups.values()) {
+    if (pts.length < 12) continue;
+    const sorted = pts.slice().sort((a, b) => a.x - b.x || a.z - b.z);
+    const lower = [];
+    for (const p of sorted) {
+      while (lower.length >= 2 && cross2(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const p = sorted[i];
+      while (upper.length >= 2 && cross2(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop();
+    upper.pop();
+    const hull = lower.concat(upper);
+    if (hull.length < 3) continue;
+    const ring = hull.map((p) => [p.x, p.z]);
+    ring.push(ring[0]);
+    const b = polygonBounds([ring]);
+    for (let x = b.minX; x <= b.maxX; x += cell) {
+      for (let z = b.minZ; z <= b.maxZ; z += cell) {
+        if (!pointInRing(x, z, ring)) continue;
+        mark(Math.floor(x / cell), Math.floor(z / cell));
+      }
+    }
+  }
   for (let pass = 0; pass < 3; pass++) {
     const fill = [];
     const seen = [...covered.values()];
@@ -947,7 +1165,7 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
               if (covered.has(`${ix + ox},${iz + oz}`)) n += 1;
             }
           }
-          if (n >= 7) fill.push([ix, iz]);
+          if (n >= 6) fill.push([ix, iz]);
         }
       }
     }
@@ -1570,9 +1788,19 @@ export async function buildCity(data, projector, hooks = {}) {
         && z <= block.maxZ
         && pointInRing(x, z, block.outer),
     );
-  const asphaltHeights = drapeAsphaltRibbons(roads.centerlines, sample, 0.28, asphaltParts);
+  const asphaltHeights = drapeAsphaltRibbons(
+    roads.centerlines,
+    sample,
+    0.28,
+    asphaltParts,
+    waterTest(water, projector, box, sample),
+    roadBlocked,
+  );
   const skipWalk = (x, z) => {
     if (roadBlocked(x, z)) return true;
+    const cover = asphaltHeights?.covered;
+    const rc = asphaltHeights?.cell;
+    if (cover && rc && cover.has(`${Math.floor(x / rc)},${Math.floor(z / rc)}`)) return true;
     for (const disk of asphaltHeights?.disks || []) {
       if (Math.hypot(x - disk.x, z - disk.z) < disk.r + 0.8) return true;
     }
