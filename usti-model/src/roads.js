@@ -62,10 +62,10 @@ function prepareSegments(features, projector) {
     const key = String(tags.highway || '').replace(/_link$/, '');
     const kind = kindOf(key);
     if (!kind) continue;
-    if (tags.bridge === 'yes' && HERO_BRIDGE.test(String(tags.name || ''))) continue;
     const local = feature.geometry.coordinates.map(([lon, lat]) => projector.toLocal(lon, lat));
     let full = 0;
     for (let i = 1; i < local.length; i++) full += hypot(local[i - 1], local[i]);
+    if (tags.bridge === 'yes' && HERO_BRIDGE.test(String(tags.name || '')) && full > 70) continue;
     let half = (WALK_WIDTH[key] || roadWidth(tags.highway) || 0) / 2;
     // A long pedestrian way is a square, not a street. The old 34 m ribbon
     // painted Mírové náměstí as a solid sand field over the orthophoto.

@@ -744,8 +744,11 @@ function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
     if (holdBank) {
       const yMax = Math.max(tri[0][1], tri[1][1], tri[2][1]);
       const yMin = Math.min(tri[0][1], tri[1][1], tri[2][1]);
+      const span = Math.hypot(tri[1][0] - tri[0][0], tri[1][2] - tri[0][2])
+        + Math.hypot(tri[2][0] - tri[0][0], tri[2][2] - tri[0][2]);
       if (yMax - yMin > 2.05) {
-        const floor = yMax - 1.25;
+        if (span > 0.4 && (yMax - yMin) / span > 0.55) continue;
+        const floor = yMax - 1.15;
         for (const vert of tri) vert[1] = Math.max(vert[1], floor);
       }
     }

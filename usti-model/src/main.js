@@ -41,6 +41,7 @@ const shotParams = new URLSearchParams(location.search);
 let quality = shotParams.get('q') || (coarseQuery.matches || weak ? 'low' : 'medium');
 const shotMode = shotParams.has('shot');
 const shotLookQuery = shotParams.get('look') || '';
+const shotAlt = Number(shotParams.get('alt')) || 16;
 const forceNight = shotParams.has('night');
 if (shotMode) localStorage.setItem('usti-help-seen', '1');
 
@@ -724,7 +725,7 @@ function updateCamera() {
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
   if (shotMode && (shotLook === 'down' || shotLookQuery === 'down')) {
-    camera.position.set(-player.x, player.y + 16, player.z);
+    camera.position.set(-player.x, player.y + (Number.isFinite(shotAlt) && shotAlt > 4 ? shotAlt : 16), player.z);
     camera.lookAt(-player.x, player.y, player.z);
     return;
   }

@@ -241,16 +241,17 @@ function addRamps(pts, deckY, sample, half, centerlines) {
     const nz = -tx;
     const probes = [
       [p.x + tx * 8, p.z + tz * 8],
-      [p.x + tx * 16, p.z + tz * 16],
-      [p.x + nx * 10, p.z + nz * 10],
-      [p.x - nx * 10, p.z - nz * 10],
-      [p.x + tx * 6 + nx * 8, p.z + tz * 6 + nz * 8],
-      [p.x + tx * 6 - nx * 8, p.z + tz * 6 - nz * 8],
+      [p.x + tx * 18, p.z + tz * 18],
+      [p.x + tx * 32, p.z + tz * 32],
+      [p.x + nx * 12, p.z + nz * 12],
+      [p.x - nx * 12, p.z - nz * 12],
+      [p.x + tx * 10 + nx * 10, p.z + tz * 10 + nz * 10],
+      [p.x + tx * 10 - nx * 10, p.z + tz * 10 - nz * 10],
       [p.x, p.z],
     ];
     let hit = null;
     for (const [sx, sz] of probes) {
-      const cand = closestOnLines(centerlines, sx, sz, 28);
+      const cand = closestOnLines(centerlines, sx, sz, 48);
       if (!cand || onDeckCenter(pts, half, cand.x, cand.z)) continue;
       if (!hit || cand.d < hit.d) hit = cand;
     }
