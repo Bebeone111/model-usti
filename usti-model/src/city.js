@@ -765,7 +765,7 @@ function ribbonHalfAt(line, i) {
 }
 
 function drapeAsphaltRibbons(lines, sample, lift, parts) {
-  const cell = 1.15;
+  const cell = 1.2;
   const covered = new Map();
   const disks = [];
   const mark = (ix, iz) => {
@@ -790,7 +790,7 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
     }
   };
   const markSeg = (a, b, half) => {
-    const reach = Math.max(2.6, half) + cell * 0.55;
+    const reach = Math.max(3.6, half + 0.6) + cell * 0.55;
     const minIx = Math.floor((Math.min(a[0], b[0]) - reach) / cell);
     const maxIx = Math.floor((Math.max(a[0], b[0]) + reach) / cell);
     const minIz = Math.floor((Math.min(a[1], b[1]) - reach) / cell);
@@ -820,10 +820,9 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
       for (let i = 0; i < n; i++) {
         r = Math.max(r, Math.hypot(pts[i][0] - cx, pts[i][1] - cz) + ribbonHalfAt(line, i));
       }
-      if (r > 6 && r < 16) {
+      if (r > 6 && r < 18) {
         markDisk(cx, cz, r);
         disks.push({ x: cx, z: cz, r });
-        continue;
       }
     }
     const segs = line.closed ? n : n - 1;
@@ -860,19 +859,119 @@ function drapeAsphaltRibbons(lines, sample, lift, parts) {
     cz /= cluster.length;
     let r = 0;
     for (const p of cluster) r = Math.max(r, Math.hypot(p[0] - cx, p[1] - cz));
-    r = Math.min(20, r + 4);
+    r = Math.min(16, r + 4);
     if (r > 7) {
       markDisk(cx, cz, r);
       disks.push({ x: cx, z: cz, r });
     }
   }
-  const seed = [...covered.values()];
-  for (const rec of seed) {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        if (dx || dz) mark(rec.ix + dx, rec.iz + dz);
+  const dilate = () => {
+    const seed = [...covered.values()];
+    for (const rec of seed) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (dx || dz) mark(rec.ix + dx, rec.iz + dz);
+        }
       }
     }
+  };
+  dilate();
+  const parent = new Map();
+  const find = (k) => {
+    let cur = k;
+    while (parent.get(cur) !== cur) cur = parent.get(cur);
+    parent.set(k, cur);
+    return cur;
+  };
+  const uni = (a, b) => {
+    a = find(a);
+    b = find(b);
+    if (a !== b) parent.set(a, b);
+  };
+  const relink = () => {
+    parent.clear();
+    for (const rec of covered.values()) {
+      const k = `${rec.ix},${rec.iz}`;
+      parent.set(k, k);
+    }
+    for (const rec of covered.values()) {
+      const k = `${rec.ix},${rec.iz}`;
+      if (parent.has(`${rec.ix + 1},${rec.iz}`)) uni(k, `${rec.ix + 1},${rec.iz}`);
+      if (parent.has(`${rec.ix},${rec.iz + 1}`)) uni(k, `${rec.ix},${rec.iz + 1}`);
+    }
+  };
+  relink();
+  const groups = new Map();
+  for (const rec of covered.values()) {
+    const id = find(`${rec.ix},${rec.iz}`);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(rec);
+  }
+  const groupList = [...groups.values()].sort((a, b) => b.length - a.length).slice(0, 140);
+  const sampleOf = (list) => {
+    const out = [];
+    const step = Math.max(1, Math.floor(list.length / 12));
+    for (let i = 0; i < list.length; i += step) out.push(list[i]);
+    return out;
+  };
+  for (let i = 0; i < groupList.length; i++) {
+    const aSamp = sampleOf(groupList[i]);
+    for (let j = i + 1; j < groupList.length; j++) {
+      const bSamp = sampleOf(groupList[j]);
+      let best = null;
+      for (const a of aSamp) {
+        for (const b of bSamp) {
+          const d = Math.hypot(a.x - b.x, a.z - b.z);
+          if (d > 26) continue;
+          if (!best || d < best.d) best = { a, b, d };
+        }
+      }
+      const big = groupList[i].length > 50 && groupList[j].length > 50;
+      if (best && (best.d < 12 || (big && best.d < 22))) markSeg([best.a.x, best.a.z], [best.b.x, best.b.z], 4.4);
+    }
+  }
+  dilate();
+  for (let pass = 0; pass < 3; pass++) {
+    const fill = [];
+    const seen = [...covered.values()];
+    for (const rec of seen) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (!dx && !dz) continue;
+          const ix = rec.ix + dx;
+          const iz = rec.iz + dz;
+          if (covered.has(`${ix},${iz}`)) continue;
+          let n = 0;
+          for (let ox = -1; ox <= 1; ox++) {
+            for (let oz = -1; oz <= 1; oz++) {
+              if (covered.has(`${ix + ox},${iz + oz}`)) n += 1;
+            }
+          }
+          if (n >= 7) fill.push([ix, iz]);
+        }
+      }
+    }
+    for (const [ix, iz] of fill) mark(ix, iz);
+  }
+  const bin = 8;
+  const bins = new Map();
+  for (const rec of covered.values()) {
+    const key = `${Math.floor(rec.x / bin)},${Math.floor(rec.z / bin)}`;
+    const prev = bins.get(key);
+    if (prev == null || rec.y > prev) bins.set(key, rec.y);
+  }
+  const br = 8;
+  for (const rec of covered.values()) {
+    const ix = Math.floor(rec.x / bin);
+    const iz = Math.floor(rec.z / bin);
+    let high = rec.y;
+    for (let dx = -br; dx <= br; dx++) {
+      for (let dz = -br; dz <= br; dz++) {
+        const y = bins.get(`${ix + dx},${iz + dz}`);
+        if (y != null && y > high) high = y;
+      }
+    }
+    rec.y = high;
   }
   const positions = [];
   const normals = [];
@@ -929,6 +1028,8 @@ function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false, roadCov
     return best;
   };
   const yAt = (x, z) => {
+    const roadY = roadYAt(x, z);
+    if (Number.isFinite(roadY)) return roadY + 0.04;
     if (!holdBank) return sample(x, z) + lift;
     const ix = Math.floor(x / cell);
     const iz = Math.floor(z / cell);
@@ -951,9 +1052,6 @@ function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false, roadCov
     const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
     const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
     if (blocked?.(mx, mz)) continue;
-    const roadY = roadYAt(mx, mz);
-    const midY = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
-    if (roadY != null && Math.abs(midY - roadY) > 0.8) continue;
     let [a, b, c] = tri;
     const abx = b[0] - a[0];
     const abz = b[2] - a[2];
