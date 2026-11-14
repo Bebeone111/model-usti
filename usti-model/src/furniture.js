@@ -99,7 +99,8 @@ export function addStreetFurniture(group, collection, projector, sample, highway
     else if (tags.highway === 'crossing') {
       const hit = snapToRoad(x, z, roads);
       if (hit) {
-        const yaw = Math.atan2(-hit.tz, hit.tx);
+        // Align local X (stripe spacing) with the road; each bar is long in Z, across the carriageway.
+        const yaw = Math.atan2(hit.tx, hit.tz);
         crossings.push({
           x: hit.x,
           z: hit.z,
