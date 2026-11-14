@@ -157,7 +157,7 @@ export function addStreetFurniture(group, collection, projector, sample, highway
       dummy.scale.set(1, 1, 1);
     }),
     instanced(stripeGeometry(), new THREE.MeshBasicMaterial({ color: 0xf7f4ee }), crossings, (dummy, point) => {
-      dummy.position.set(point.x, point.y + 0.05, point.z);
+      dummy.position.set(point.x, point.y + 0.34, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, point.scaleZ || 1);
     }),
