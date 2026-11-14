@@ -526,10 +526,13 @@ function frameQuayJoin() {
   const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
   const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
   if (!end) return false;
-  player.x = end.x + end.tx * 3.2;
-  player.z = end.z + end.tz * 3.2;
-  player.yaw = Math.atan2(end.tx, end.tz);
-  player.pitch = -0.2;
+  const a = { x: end.x + end.tx * 9, z: end.z + end.tz * 9 };
+  const b = { x: end.x - end.tx * 9, z: end.z - end.tz * 9 };
+  const pick = terrain.sample(a.x, a.z) >= terrain.sample(b.x, b.z) ? a : b;
+  player.x = pick.x;
+  player.z = pick.z;
+  player.yaw = Math.atan2(-(end.x - player.x), -(end.z - player.z));
+  player.pitch = -0.18;
   player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
   shotLook = 'join';
   return true;
