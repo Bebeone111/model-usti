@@ -1698,7 +1698,7 @@ export function terraceGround(geometry, collision, basins) {
   geometry.computeVertexNormals();
 }
 
-export function liftSunkRoads(geometry, radius = 9, maxLift = 5.5) {
+export function liftSunkRoads(geometry, radius = 14, maxLift = 8) {
   if (!geometry?.attributes?.position) return;
   const pos = geometry.attributes.position;
   const n = pos.count;
