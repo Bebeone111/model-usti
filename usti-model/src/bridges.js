@@ -532,7 +532,7 @@ function buildMarian(pts, waterY, sample, detail, centerlines) {
       cableGeos.push(strut(pylon.top.x, pylon.top.y, pylon.top.z, deck.x, deck.y, deck.z, 0.11, 4));
     }
   }
-  const ramps = addRamps(fr, deckY, sample, half, centerlines);
+  const ramps = [];
   const group = new THREE.Group();
   group.name = 'mariansky';
   const roadMesh = merge([deckSlab(fr, deckY, half, 0, 0.85), ...rampGeos(ramps)], road);
@@ -625,7 +625,7 @@ function buildBenes(pts, waterY, sample, detail, centerlines) {
   for (const p of [pierA, pierB]) {
     archGeos.push(boxGeo(p.x, waterY - 2.4, p.z, 6.2, deckY - waterY + 4.2, 4.2, Math.atan2(p.tx, p.tz)));
   }
-  const ramps = addRamps(fr, deckY, sample, half, centerlines);
+  const ramps = [];
   const group = new THREE.Group();
   group.name = 'benes';
   const roadMesh = merge([deckMesh(fr, deckY, half - 2.1, camber), ...rampGeos(ramps)], road);

@@ -10,6 +10,7 @@ import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
 import { addJednoUstiMark, addStreetFurniture, addTrolleys } from './furniture.js';
 import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks, seatRoadsToDecks } from './bridges.js';
+import { placeQuayRibbon } from './quay.js';
 import { addHeroBuildings } from './landmarks.js';
 import { addCableCar } from './cable.js';
 import { createDaylight, fetchAirQuality, fetchWeather } from './daylight.js';
@@ -523,17 +524,38 @@ function faceMarianDeck() {
 }
 
 function frameQuayJoin() {
-  const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
-  const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
-  if (!end) return false;
-  const a = { x: end.x + end.tx * 9, z: end.z + end.tz * 9 };
-  const b = { x: end.x - end.tx * 9, z: end.z - end.tz * 9 };
-  const pick = terrain.sample(a.x, a.z) >= terrain.sample(b.x, b.z) ? a : b;
-  player.x = pick.x;
-  player.z = pick.z;
-  player.yaw = Math.atan2(-(end.x - player.x), -(end.z - player.z));
-  player.pitch = -0.18;
-  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
+  const deck = (collision.decks || []).find((item) => item.name === 'marian');
+  if (!deck) return false;
+  let end = deck.ends?.slice().sort((a, b) => b.z - a.z)[0];
+  if (!end) {
+    const cx = (deck.minX + deck.maxX) / 2;
+    end = { x: cx, z: deck.maxZ, tx: 0, tz: 1, nx: 1, nz: 0, y: deck.y, half: 8 };
+  }
+  const cx = (deck.minX + deck.maxX) / 2;
+  const cz = (deck.minZ + deck.maxZ) / 2;
+  const waterY = collision.waterY ?? 0.9;
+  let stand = null;
+  for (const chain of collision.quayChains || []) {
+    for (const p of chain.pts || []) {
+      const d = Math.hypot(p[0] - end.x, p[1] - end.z);
+      if (d < 8 || d > 36) continue;
+      if (terrain.sample(p[0], p[1]) < waterY + 1.6) continue;
+      if (!stand || d < stand.d) stand = { x: p[0], z: p[1], d };
+    }
+  }
+  if (shotLookQuery === 'down') {
+    player.x = end.x + (end.tx || 0) * 3;
+    player.z = end.z + (end.tz || 0) * 3;
+  } else if (stand) {
+    player.x = stand.x;
+    player.z = stand.z;
+  } else {
+    player.x = end.x + (end.tx || 0) * 10;
+    player.z = end.z + (end.tz || 0) * 10;
+  }
+  player.yaw = Math.atan2(-(cx - player.x), -(cz - player.z));
+  player.pitch = -0.12;
+  player.y = Number.isFinite(end.y) ? end.y : deck.y;
   shotLook = 'join';
   return true;
 }
@@ -746,8 +768,8 @@ function updateCamera() {
     return;
   }
   if (shotMode && (shotLook === 'join' || shotLookQuery === 'join')) {
-    camera.position.set(-(player.x - fx * 9), player.y + 6.4, player.z - fz * 9);
-    camera.lookAt(-(player.x + fx * 10), player.y + 0.2, player.z + fz * 10);
+    camera.position.set(-(player.x - fx * 11), player.y + 4.8, player.z - fz * 11);
+    camera.lookAt(-(player.x + fx * 14), player.y, player.z + fz * 14);
     return;
   }
   if (shotMode && (shotLook === 'logo' || shotLookQuery === 'logo')) {
@@ -1640,10 +1662,13 @@ async function boot() {
     sample: terrain.sample.bind(terrain),
     waterY: city.waterY ?? 0.9,
     detail: true,
-    centerlines: city.quayCenterlines || city.centerlines,
+    centerlines: city.centerlines,
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
+  collision.quayChains = city.quayChains || [];
+  collision.waterY = city.waterY ?? 0.9;
+  placeQuayRibbon(view, city.quayChains, bridges.decks, terrain.sample.bind(terrain), city.waterY ?? 0.9);
   if (asphalt?.geometry) {
     seatRoadsToDecks(asphalt.geometry, bridges.decks);
     liftSunkRoads(asphalt.geometry);
@@ -1731,13 +1756,15 @@ async function boot() {
   daylight = createDaylight({ hemi, sun, sky, fog: scene.fog, scene, camera });
   const applyHash = () => {
     const hashed = readHash();
+    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : shotLookQuery === 'logo' ? 'logo' : '';
+    if (shotLookQuery === 'join' || shotLookQuery === 'down') {
+      if (frameQuayJoin()) {
+        if (shotLookQuery === 'down') shotLook = 'down';
+        return true;
+      }
+    }
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : shotLookQuery === 'logo' ? 'logo' : '';
-    if (shotLookQuery === 'join') {
-      frameQuayJoin();
-      return true;
-    }
     if (shotLookQuery === 'logo' && api.jednoUsti) {
       const mark = api.jednoUsti;
       placeNear(mark.x, mark.z, Math.atan2(-(mark.lookX - mark.x), -(mark.lookZ - mark.z)), -0.08);
