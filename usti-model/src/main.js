@@ -524,17 +524,38 @@ function faceMarianDeck() {
 }
 
 function frameQuayJoin() {
-  const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
-  const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
-  if (!end) return false;
-  const inland = { x: end.x + end.tx * 8, z: end.z + end.tz * 8 };
-  const other = { x: end.x - end.tx * 8, z: end.z - end.tz * 8 };
-  const pick = terrain.sample(inland.x, inland.z) >= terrain.sample(other.x, other.z) ? inland : other;
-  player.x = pick.x;
-  player.z = pick.z;
-  player.yaw = Math.atan2(-(end.x - player.x), -(end.z - player.z));
+  const deck = (collision.decks || []).find((item) => item.name === 'marian');
+  if (!deck) return false;
+  let end = deck.ends?.slice().sort((a, b) => b.z - a.z)[0];
+  if (!end) {
+    const cx = (deck.minX + deck.maxX) / 2;
+    end = { x: cx, z: deck.maxZ, tx: 0, tz: 1, nx: 1, nz: 0, y: deck.y, half: 8 };
+  }
+  const cx = (deck.minX + deck.maxX) / 2;
+  const cz = (deck.minZ + deck.maxZ) / 2;
+  const waterY = collision.waterY ?? 0.9;
+  let stand = null;
+  for (const chain of collision.quayChains || []) {
+    for (const p of chain.pts || []) {
+      const d = Math.hypot(p[0] - end.x, p[1] - end.z);
+      if (d < 8 || d > 36) continue;
+      if (terrain.sample(p[0], p[1]) < waterY + 1.6) continue;
+      if (!stand || d < stand.d) stand = { x: p[0], z: p[1], d };
+    }
+  }
+  if (shotLookQuery === 'down') {
+    player.x = end.x + (end.tx || 0) * 3;
+    player.z = end.z + (end.tz || 0) * 3;
+  } else if (stand) {
+    player.x = stand.x;
+    player.z = stand.z;
+  } else {
+    player.x = end.x + (end.tx || 0) * 10;
+    player.z = end.z + (end.tz || 0) * 10;
+  }
+  player.yaw = Math.atan2(-(cx - player.x), -(cz - player.z));
   player.pitch = -0.12;
-  player.y = end.y;
+  player.y = Number.isFinite(end.y) ? end.y : deck.y;
   shotLook = 'join';
   return true;
 }
@@ -1645,6 +1666,8 @@ async function boot() {
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
+  collision.quayChains = city.quayChains || [];
+  collision.waterY = city.waterY ?? 0.9;
   placeQuayRibbon(view, city.quayChains, bridges.decks, terrain.sample.bind(terrain), city.waterY ?? 0.9);
   if (asphalt?.geometry) {
     seatRoadsToDecks(asphalt.geometry, bridges.decks);

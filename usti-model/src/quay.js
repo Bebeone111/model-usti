@@ -106,6 +106,23 @@ function weld(chains) {
   return out;
 }
 
+function smooth(pts) {
+  if (pts.length < 3) return pts;
+  let cur = pts;
+  for (let pass = 0; pass < 3; pass++) {
+    const out = [cur[0]];
+    for (let i = 1; i < cur.length - 1; i++) {
+      out.push([
+        cur[i - 1][0] * 0.25 + cur[i][0] * 0.5 + cur[i + 1][0] * 0.25,
+        cur[i - 1][1] * 0.25 + cur[i][1] * 0.5 + cur[i + 1][1] * 0.25,
+      ]);
+    }
+    out.push(cur[cur.length - 1]);
+    cur = out;
+  }
+  return cur;
+}
+
 function densify(pts, step) {
   const out = [pts[0]];
   for (let i = 1; i < pts.length; i++) {
@@ -202,26 +219,27 @@ function pushTri(positions, normals, a, b, c) {
   for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
 }
 
+function pad(positions, normals, origin, ux, uz, vx, vz, u0, u1, v0, v1, y) {
+  const p = (u, v) => [origin[0] + ux * u + vx * v, y, origin[1] + uz * u + vz * v];
+  const a = p(u0, v0);
+  const b = p(u1, v0);
+  const c = p(u1, v1);
+  const d = p(u0, v1);
+  pushTri(positions, normals, a, b, c);
+  pushTri(positions, normals, a, c, d);
+}
+
 function apron(positions, normals, decks) {
   for (const deck of decks || []) {
     if (deck.name !== 'marian' && deck.name !== 'benes') continue;
     for (const end of deck.ends || []) {
-      const across = Math.max(HALF, end.half || HALF) + 0.35;
       const y = end.y;
-      const back = 4;
-      const fwd = 12;
-      const ax = end.x - end.tx * back;
-      const az = end.z - end.tz * back;
-      const bx = end.x + end.tx * fwd;
-      const bz = end.z + end.tz * fwd;
-      const nx = end.nx || 0;
-      const nz = end.nz || 0;
-      const a0 = [ax + nx * across, y, az + nz * across];
-      const a1 = [ax - nx * across, y, az - nz * across];
-      const b0 = [bx + nx * across, y, bz + nz * across];
-      const b1 = [bx - nx * across, y, bz - nz * across];
-      pushTri(positions, normals, a0, b0, b1);
-      pushTri(positions, normals, a0, b1, a1);
+      const tx = end.tx || 0;
+      const tz = end.tz || 1;
+      const nx = end.nx || -tz;
+      const nz = end.nz || tx;
+      pad(positions, normals, [end.x, end.z], tx, tz, nx, nz, -6, 18, -HALF - 1.2, HALF + 1.2, y);
+      pad(positions, normals, [end.x, end.z], nx, nz, tx, tz, -22, 22, -6, 8, y);
     }
   }
 }
@@ -234,7 +252,7 @@ export function placeQuayRibbon(group, chains, decks, sample, waterY, material) 
   const normals = [];
   apron(positions, normals, decks);
   for (const raw of welded) {
-    const pts = densify(raw.pts, 3);
+    const pts = densify(smooth(raw.pts), 3);
     if (pts.length < 2) continue;
     const ys = heights(pts, sample, waterY, decks);
     for (let i = 0; i < pts.length - 1; i++) {
