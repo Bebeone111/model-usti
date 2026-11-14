@@ -141,7 +141,7 @@ const keys = new Set();
 let camBack = 8.2;
 let thirdPerson = true;
 let pointerLocked = false;
-let walkSpeed = 3.6;
+let walkSpeed = 14.4;
 let stickX = 0;
 let stickY = 0;
 let sprintHeld = false;
@@ -673,7 +673,7 @@ function updatePlayer(dt) {
     const mz = forward * scale * forwardZ + strafe * scale * rightZ;
     const len = Math.hypot(mx, mz) || 1;
     const pace = photoMode ? 0.45 : 1;
-    const speed = walkSpeed * (fast ? 4 : 1) * pace * Math.min(1, mag);
+    const speed = walkSpeed * (fast ? 2 : 1) * pace * Math.min(1, mag);
     tryMove((mx / len) * speed * dt, (mz / len) * speed * dt);
     bob += dt * (fast ? 9 : 7.2);
     gait = Math.min(1, gait + dt * 8);
@@ -722,6 +722,13 @@ function updateCamera() {
   camY = Math.max(player.y + 1.7, floor + 2.05, camY);
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
+  if (shotMode && shotLook === 'down') {
+    camera.position.set(-player.x, player.y + 28, player.z);
+    camera.up.set(0, 0, 1);
+    camera.lookAt(-player.x, player.y, player.z);
+    camera.up.set(0, 1, 0);
+    return;
+  }
   if (shotMode && shotLook === 'marian') {
     camera.lookAt(-(player.x + fx * 36), player.y + 1.55 + sin * 8, player.z + fz * 36);
     return;
@@ -1112,7 +1119,7 @@ async function loadTexture(file, onProgress) {
 let wantPlay = false;
 let wantTour = false;
 let built = false;
-let shotLook = '';
+let shotLook = shotParams.get('look') || '';
 
 function beginPlay(tour) {
   wantPlay = true;
@@ -1594,7 +1601,7 @@ async function boot() {
   goalMark.visible = false;
   goalMark.userData.noShadow = true;
   view.add(goalMark);
-  furniture = addStreetFurniture(view, loaded.furniture, projector, terrain.sample.bind(terrain));
+  furniture = addStreetFurniture(view, loaded.furniture, projector, terrain.sample.bind(terrain), loaded.highways);
   lampMat = furniture.lampMat;
   const bridges = addSignatureBridges(view, {
     highways: loaded.highways,
