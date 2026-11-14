@@ -723,7 +723,7 @@ function updateCamera() {
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
   if (shotMode && shotLook === 'down') {
-    camera.position.set(-player.x, player.y + 28, player.z);
+    camera.position.set(-player.x, player.y + 16, player.z);
     camera.up.set(0, 0, 1);
     camera.lookAt(-player.x, player.y, player.z);
     camera.up.set(0, 1, 0);
