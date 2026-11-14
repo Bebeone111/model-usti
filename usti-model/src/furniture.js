@@ -345,11 +345,15 @@ export function addJednoUstiMark(group, projector, sample, buildings) {
   const root = new THREE.Group();
   root.name = 'jednousti';
   const board = new THREE.Mesh(
-    new THREE.BoxGeometry(1.72, 1.18, 0.07),
-    new THREE.MeshLambertMaterial({ map: typeof document === 'undefined' ? null : jednoUstiTexture(), color: 0x1d4a86 }),
+    new THREE.PlaneGeometry(1.72, 1.18),
+    new THREE.MeshLambertMaterial({
+      map: typeof document === 'undefined' ? null : jednoUstiTexture(),
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+    }),
   );
   board.position.set(sx, y + 2.35, sz);
-  board.rotation.y = yaw;
+  board.rotation.y = yaw + Math.PI;
   const walker = makeLogoWalker();
   walker.position.set(mx + tx * along + nx * 1.85, y, mz + tz * along + nz * 1.85);
   walker.rotation.y = yaw;
