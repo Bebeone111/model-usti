@@ -744,10 +744,7 @@ function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
     if (holdBank) {
       const yMax = Math.max(tri[0][1], tri[1][1], tri[2][1]);
       const yMin = Math.min(tri[0][1], tri[1][1], tri[2][1]);
-      const span = Math.hypot(tri[1][0] - tri[0][0], tri[1][2] - tri[0][2])
-        + Math.hypot(tri[2][0] - tri[0][0], tri[2][2] - tri[0][2]);
       if (yMax - yMin > 2.05) {
-        if (span > 0.4 && (yMax - yMin) / span > 0.55) continue;
         const floor = yMax - 1.15;
         for (const vert of tri) vert[1] = Math.max(vert[1], floor);
       }
@@ -1697,6 +1694,43 @@ export function terraceGround(geometry, collision, basins) {
     const z = pos.getZ(i);
     pos.setY(i, seatY(x, z, pos.getY(i), collision, basins));
   }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+export function liftSunkRoads(geometry, radius = 9, maxLift = 5.5) {
+  if (!geometry?.attributes?.position) return;
+  const pos = geometry.attributes.position;
+  const n = pos.count;
+  const cell = 6;
+  const grid = new Map();
+  const key = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  for (let i = 0; i < n; i++) {
+    const k = key(pos.getX(i), pos.getZ(i));
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const next = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    let high = y;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        for (const j of grid.get(`${ix + dx},${iz + dz}`) || []) {
+          const d = Math.hypot(x - pos.getX(j), z - pos.getZ(j));
+          if (d > radius) continue;
+          high = Math.max(high, pos.getY(j));
+        }
+      }
+    }
+    const lift = high - y;
+    next[i] = lift > 0.7 && lift < maxLift ? y + lift * 0.92 : y;
+  }
+  for (let i = 0; i < n; i++) pos.setY(i, next[i]);
   pos.needsUpdate = true;
   geometry.computeVertexNormals();
 }

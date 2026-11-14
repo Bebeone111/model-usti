@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, liftSunkRoads, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1614,7 +1614,10 @@ async function boot() {
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
-  if (asphalt?.geometry) seatRoadsToDecks(asphalt.geometry, bridges.decks);
+  if (asphalt?.geometry) {
+    seatRoadsToDecks(asphalt.geometry, bridges.decks);
+    liftSunkRoads(asphalt.geometry);
+  }
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {
