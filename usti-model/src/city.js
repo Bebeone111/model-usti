@@ -731,23 +731,113 @@ function streetEdge(ring, roads) {
   return best ? best.index : longestIndex;
 }
 
+function pushRoadTri(positions, normals, a, b, c) {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  let nx = uy * vz - uz * vy;
+  let ny = uz * vx - ux * vz;
+  let nz = ux * vy - uy * vx;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  nx /= len;
+  ny /= len;
+  nz /= len;
+  if (ny < 0) {
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+    positions.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
+  } else {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  }
+  for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
+}
+
+function drapeAsphaltRibbons(lines, sample, lift, parts) {
+  const positions = [];
+  const normals = [];
+  for (const line of lines || []) {
+    if (line.quay || line.closed || !line.pts || line.pts.length < 2) continue;
+    const pts = line.pts;
+    const n = pts.length;
+    const raw = pts.map((p) => sample(p[0], p[1]) + lift);
+    const acc = [0];
+    for (let i = 1; i < n; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const ys = raw.map((y, i) => {
+      let high = y;
+      for (let j = 0; j < n; j++) {
+        if (Math.abs(acc[j] - acc[i]) <= 14) high = Math.max(high, raw[j]);
+      }
+      return high;
+    });
+    const halfAt = (i) => {
+      const h = line.half;
+      if (!h?.length) return 3.4;
+      if (i <= 0) return h[0];
+      if (i >= h.length) return h[h.length - 1];
+      return Math.max(h[Math.min(i, h.length - 1)], h[Math.min(i - 1, h.length - 1)]);
+    };
+    const segs = line.closed ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = -dz / len;
+      const nz = dx / len;
+      const ha = Math.max(2.4, halfAt(i));
+      const hb = Math.max(2.4, halfAt((i + 1) % n));
+      const ya = ys[i];
+      const yb = ys[(i + 1) % n];
+      const a0 = [a[0] + nx * ha, ya, a[1] + nz * ha];
+      const a1 = [a[0] - nx * ha, ya, a[1] - nz * ha];
+      const b0 = [b[0] + nx * hb, yb, b[1] + nz * hb];
+      const b1 = [b[0] - nx * hb, yb, b[1] - nz * hb];
+      pushRoadTri(positions, normals, a0, b0, b1);
+      pushRoadTri(positions, normals, a0, b1, a1);
+    }
+  }
+  if (positions.length) parts.push({ positions, normals });
+}
+
 function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
   const positions = [];
   const normals = [];
+  const cell = 2.2;
+  const grid = new Map();
+  if (holdBank) {
+    for (let i = 0; i < flat.length; i += 2) {
+      const x = flat[i];
+      const z = flat[i + 1];
+      const y = sample(x, z) + lift;
+      const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+      const prev = grid.get(key);
+      if (prev == null || y > prev) grid.set(key, y);
+    }
+  }
+  const yAt = (x, z) => {
+    if (!holdBank) return sample(x, z) + lift;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    let high = sample(x, z) + lift;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const y = grid.get(`${ix + dx},${iz + dz}`);
+        if (y != null && y > high) high = y;
+      }
+    }
+    return high;
+  };
   for (let i = 0; i < flat.length; i += 6) {
     const tri = [];
     for (let k = 0; k < 3; k++) {
       const x = flat[i + k * 2];
       const z = flat[i + k * 2 + 1];
-      tri.push([x, sample(x, z) + lift, z]);
-    }
-    if (holdBank) {
-      const yMax = Math.max(tri[0][1], tri[1][1], tri[2][1]);
-      const yMin = Math.min(tri[0][1], tri[1][1], tri[2][1]);
-      if (yMax - yMin > 2.05) {
-        const floor = yMax - 1.15;
-        for (const vert of tri) vert[1] = Math.max(vert[1], floor);
-      }
+      tri.push([x, yAt(x, z), z]);
     }
     const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
     const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
@@ -1267,7 +1357,8 @@ export async function buildCity(data, projector, hooks = {}) {
         && z <= block.maxZ
         && pointInRing(x, z, block.outer),
     );
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked, true);
+  drapeAsphaltRibbons(roads.centerlines, sample, 0.28, asphaltParts);
+  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, null, true);
   drapeFlat(roads.walk, sample, 0.14, walkParts, roadBlocked);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
@@ -1757,7 +1848,7 @@ export function terraceGround(geometry, collision, basins) {
   geometry.computeVertexNormals();
 }
 
-export function liftSunkRoads(geometry, radius = 5.2, maxLift = 4) {
+export function liftSunkRoads(geometry, radius = 6.4, maxLift = 12) {
   if (!geometry?.attributes?.position) return;
   const pos = geometry.attributes.position;
   const n = pos.count;
