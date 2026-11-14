@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { pointInRing } from './geom.js';
+import { distPointSeg, pointInRing } from './geom.js';
 
 const MARIAN_FALLBACK = [
   [14.05235, 50.66155],
@@ -191,7 +191,42 @@ function deckOutline(fr, half) {
   return left.concat(right, [left[0]]);
 }
 
-function addRamps(pts, deckY, sample, half) {
+function closestOnLines(lines, x, z, maxDist) {
+  let best = null;
+  for (const line of lines || []) {
+    const pts = line.pts;
+    if (!pts || pts.length < 2) continue;
+    const n = pts.length;
+    const spans = line.closed ? n : n - 1;
+    for (let i = 0; i < spans; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len2 = dx * dx + dz * dz;
+      let t = len2 > 0 ? ((x - a[0]) * dx + (z - a[1]) * dz) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const px = a[0] + dx * t;
+      const pz = a[1] + dz * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d > maxDist) continue;
+      if (best && d >= best.d) continue;
+      const len = Math.sqrt(len2) || 1;
+      const half = line.half?.[Math.min(i, Math.max(0, (line.half.length || 1) - 1))] ?? 3.4;
+      best = { x: px, z: pz, d, half, tx: dx / len, tz: dz / len };
+    }
+  }
+  return best;
+}
+
+function onDeckCenter(pts, half, x, z) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (distPointSeg(x, z, pts[i].x, pts[i].z, pts[i + 1].x, pts[i + 1].z) < half * 0.55) return true;
+  }
+  return false;
+}
+
+function addRamps(pts, deckY, sample, half, centerlines) {
   const extra = [];
   for (const end of [0, pts.length - 1]) {
     const dir = end === 0 ? -1 : 1;
@@ -202,21 +237,69 @@ function addRamps(pts, deckY, sample, half) {
     const len = Math.hypot(dx, dz) || 1;
     const tx = dx / len;
     const tz = dz / len;
-    let x = p.x;
-    let z = p.z;
-    const ramp = [{ x, z, y: deckY }];
-    for (let i = 0; i < 18; i++) {
-      x += tx * 4;
-      z += tz * 4;
-      const gy = sample(x, z);
-      const t = (i + 1) / 18;
-      const y = deckY + (Math.max(gy, deckY - 8) - deckY) * Math.min(1, t * t * 1.4);
-      ramp.push({ x, z, y });
-      if (gy >= deckY - 0.35) break;
+    const nx = tz;
+    const nz = -tx;
+    const probes = [
+      [p.x + tx * 8, p.z + tz * 8],
+      [p.x + tx * 16, p.z + tz * 16],
+      [p.x + nx * 10, p.z + nz * 10],
+      [p.x - nx * 10, p.z - nz * 10],
+      [p.x + tx * 6 + nx * 8, p.z + tz * 6 + nz * 8],
+      [p.x + tx * 6 - nx * 8, p.z + tz * 6 - nz * 8],
+      [p.x, p.z],
+    ];
+    let hit = null;
+    for (const [sx, sz] of probes) {
+      const cand = closestOnLines(centerlines, sx, sz, 28);
+      if (!cand || onDeckCenter(pts, half, cand.x, cand.z)) continue;
+      if (!hit || cand.d < hit.d) hit = cand;
     }
-    extra.push({ ramp, nx: tz, nz: -tx, half });
+    const ramp = [{ x: p.x, z: p.z, y: deckY }];
+    let rh = half;
+    if (hit && Math.hypot(hit.x - p.x, hit.z - p.z) > 0.45) {
+      const span = Math.hypot(hit.x - p.x, hit.z - p.z);
+      const steps = Math.max(2, Math.ceil(span / 3.2));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const x = p.x + (hit.x - p.x) * t;
+        const z = p.z + (hit.z - p.z) * t;
+        const gy = sample(x, z) + 0.28;
+        ramp.push({ x, z, y: deckY + (gy - deckY) * t });
+      }
+      ramp[ramp.length - 1].y = sample(hit.x, hit.z) + 0.28;
+      rh = Math.max(half * 0.7, hit.half);
+    } else {
+      let x = p.x;
+      let z = p.z;
+      for (let i = 0; i < 18; i++) {
+        x += tx * 4;
+        z += tz * 4;
+        const gy = sample(x, z);
+        const t = (i + 1) / 18;
+        const y = deckY + (Math.max(gy, deckY - 8) - deckY) * Math.min(1, t * t * 1.4);
+        ramp.push({ x, z, y });
+        if (gy >= deckY - 0.35) break;
+      }
+    }
+    extra.push({ ramp, nx, nz, half: rh });
   }
   return extra;
+}
+
+function rampDeckRecords(ramps) {
+  const decks = [];
+  for (const { ramp, nx, nz, half } of ramps) {
+    for (let i = 1; i < ramp.length; i++) {
+      const a = ramp[i - 1];
+      const b = ramp[i];
+      const fr = frames([
+        { x: a.x, z: a.z },
+        { x: b.x, z: b.z },
+      ]).map((p) => ({ ...p, nx, nz }));
+      decks.push(Object.assign(deckRecord(fr, (a.y + b.y) / 2 + 0.04, half), { name: 'ramp' }));
+    }
+  }
+  return decks;
 }
 
 function rampGeos(ramps) {
@@ -302,6 +385,8 @@ function deckRecord(fr, y, half, walk = true) {
     maxZ = Math.max(maxZ, z);
   }
   const mid = fr[Math.floor(fr.length / 2)] || fr[0];
+  const a = fr[0];
+  const b = fr[fr.length - 1];
   return {
     outer,
     holes: [],
@@ -311,8 +396,15 @@ function deckRecord(fr, y, half, walk = true) {
     maxZ,
     y,
     walk,
+    half,
     tx: mid?.tx || 0,
     tz: mid?.tz || 0,
+    ends: a && b
+      ? [
+          { x: a.x, z: a.z, tx: -(a.tx || 0), tz: -(a.tz || 0), nx: a.nx || 0, nz: a.nz || 0, half, y },
+          { x: b.x, z: b.z, tx: b.tx || 0, tz: b.tz || 0, nx: b.nx || 0, nz: b.nz || 0, half, y },
+        ]
+      : [],
     blocksWalk: false,
     blocksCamera: false,
     kind: 'deck',
@@ -383,7 +475,7 @@ function northEndT(pts) {
   return a.z >= b.z ? 0.08 : 0.92;
 }
 
-function buildMarian(pts, waterY, sample, detail) {
+function buildMarian(pts, waterY, sample, detail, centerlines) {
   const deckY = waterY + 9.15;
   const fr = frames(resample(pts, 4.2));
   const half = 8.55;
@@ -439,10 +531,10 @@ function buildMarian(pts, waterY, sample, detail) {
       cableGeos.push(strut(pylon.top.x, pylon.top.y, pylon.top.z, deck.x, deck.y, deck.z, 0.11, 4));
     }
   }
-  const ramps = addRamps(fr, deckY, sample, half);
+  const ramps = addRamps(fr, deckY, sample, half, centerlines);
   const group = new THREE.Group();
   group.name = 'mariansky';
-  const roadMesh = merge([deckSlab(fr, deckY, half, 0, 0.85)], road);
+  const roadMesh = merge([deckSlab(fr, deckY, half, 0, 0.85), ...rampGeos(ramps)], road);
   if (roadMesh) {
     roadMesh.renderOrder = 2;
     roadMesh.material.polygonOffset = true;
@@ -453,12 +545,10 @@ function buildMarian(pts, waterY, sample, detail) {
   const walkMesh = merge([deckSlab(fr, deckY + 1.22, 1.9, 0, 0.28)], walk);
   const pylonMesh = merge(pylonGeos.filter(Boolean), pale);
   const cableMesh = merge(cableGeos.filter(Boolean), pale);
-  const extra = merge(rampGeos(ramps), steel);
   if (roadMesh) group.add(roadMesh);
   if (walkMesh) group.add(walkMesh);
   if (pylonMesh) group.add(pylonMesh);
   if (cableMesh) group.add(cableMesh);
-  if (extra) group.add(extra);
   const rails = [];
   for (let i = 0; i < fr.length; i += detail ? 1 : 2) {
     const p = fr[i];
@@ -471,13 +561,16 @@ function buildMarian(pts, waterY, sample, detail) {
   if (railMesh) group.add(railMesh);
   return {
     group,
-    decks: [Object.assign(deckRecord(fr, deckY + 0.06, half + 0.15), { name: 'marian' })],
+    decks: [
+      Object.assign(deckRecord(fr, deckY + 0.06, half + 0.15), { name: 'marian' }),
+      ...rampDeckRecords(ramps),
+    ],
     rails: railBlockers(fr, half, deckY),
     lights: pylons.map((p) => ({ x: p.x, y: p.y + 12, z: p.z })),
   };
 }
 
-function buildBenes(pts, waterY, sample, detail) {
+function buildBenes(pts, waterY, sample, detail, centerlines) {
   const deckY = waterY + 7.8;
   const camber = 3.4;
   const rise = 22;
@@ -531,7 +624,7 @@ function buildBenes(pts, waterY, sample, detail) {
   for (const p of [pierA, pierB]) {
     archGeos.push(boxGeo(p.x, waterY - 2.4, p.z, 6.2, deckY - waterY + 4.2, 4.2, Math.atan2(p.tx, p.tz)));
   }
-  const ramps = addRamps(fr, deckY, sample, half);
+  const ramps = addRamps(fr, deckY, sample, half, centerlines);
   const group = new THREE.Group();
   group.name = 'benes';
   const roadMesh = merge([deckMesh(fr, deckY, half - 2.1, camber), ...rampGeos(ramps)], road);
@@ -555,13 +648,13 @@ function buildBenes(pts, waterY, sample, detail) {
   if (railMesh) group.add(railMesh);
   return {
     group,
-    decks: [deckRecord(fr, deckY + 0.05, half)],
+    decks: [Object.assign(deckRecord(fr, deckY + 0.05, half), { name: 'benes' }), ...rampDeckRecords(ramps)],
     rails: railBlockers(fr, half, deckY),
     lights: [pierA, pierB].map((p) => ({ x: p.x, y: deckY + 4.2, z: p.z })),
   };
 }
 
-function buildRail(pts, waterY, sample, detail) {
+function buildRail(pts, waterY, sample, detail, centerlines) {
   const topY = waterY + 12.4;
   const botY = waterY + 6.2;
   const fr = frames(resample(pts, detail ? 6.5 : 9));
@@ -632,7 +725,7 @@ function buildRail(pts, waterY, sample, detail) {
   }
   const walkFr = fr.map((p) => ({ ...p, x: p.x + p.nx * walkShift, z: p.z + p.nz * walkShift }));
   const walkGeos = [deckSlab(walkFr, botY + 0.12, 1.2, 0, 0.28)];
-  const ramps = addRamps(walkFr, botY + 0.08, sample, 1.25);
+  const ramps = addRamps(walkFr, botY + 0.08, sample, 1.25, centerlines);
   const group = new THREE.Group();
   group.name = 'zeleznice';
   const steelMesh = merge(geos.filter(Boolean), steel);
@@ -663,7 +756,7 @@ function buildRail(pts, waterY, sample, detail) {
   };
 }
 
-export function addSignatureBridges(group, { highways, railways, projector, sample, waterY = 1.1, detail = true }) {
+export function addSignatureBridges(group, { highways, railways, projector, sample, waterY = 1.1, detail = true, centerlines }) {
   const marianPts = pickLine(
     namedLines(highways, projector, (tags) => /Mariánský most/i.test(tags.name || '')),
     MARIAN_FALLBACK,
@@ -687,9 +780,9 @@ export function addSignatureBridges(group, { highways, railways, projector, samp
     50.65608,
   );
   const parts = [
-    buildMarian(marianPts, waterY, sample, detail),
-    buildBenes(benesPts, waterY, sample, detail),
-    buildRail(railPts, waterY, sample, detail),
+    buildMarian(marianPts, waterY, sample, detail, centerlines),
+    buildBenes(benesPts, waterY, sample, detail, centerlines),
+    buildRail(railPts, waterY, sample, detail, centerlines),
   ];
   const decks = [];
   const rails = [];
@@ -731,6 +824,38 @@ export function nearestWalkDeck(decks, x, z, maxDist = 48) {
     if (!best || dist < best.dist) best = { deck, dist, cx, cz };
   }
   return best;
+}
+
+export function seatRoadsToDecks(geometry, decks) {
+  if (!geometry?.attributes?.position || !decks?.length) return;
+  const pos = geometry.attributes.position;
+  const abutments = [];
+  for (const deck of decks) {
+    if (!deck.walk || deck.name === 'ramp' || deck.kind === 'track') continue;
+    if (!(deck.half > 3.2) || !deck.ends?.length) continue;
+    for (const end of deck.ends) abutments.push(end);
+  }
+  if (!abutments.length) return;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    let nearest = null;
+    for (const end of abutments) {
+      const dist = Math.hypot(x - end.x, z - end.z);
+      if (dist > 12) continue;
+      const across = Math.abs((x - end.x) * end.nx + (z - end.z) * end.nz);
+      if (across > end.half + 5.5) continue;
+      if (Math.abs(y - end.y) > 9) continue;
+      if (!nearest || dist < nearest.dist) nearest = { dist, end };
+    }
+    if (!nearest) continue;
+    const t = Math.min(1, nearest.dist / 11);
+    const ease = (1 - t) * (1 - t);
+    pos.setY(i, nearest.end.y * ease + y * (1 - ease));
+  }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
 }
 
 export function punchWaterUnderDecks(geometry, decks, waterY) {

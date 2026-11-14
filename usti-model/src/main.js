@@ -9,7 +9,7 @@ import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
 import { addStreetFurniture, addTrolleys } from './furniture.js';
-import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks } from './bridges.js';
+import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks, seatRoadsToDecks } from './bridges.js';
 import { addHeroBuildings } from './landmarks.js';
 import { addCableCar } from './cable.js';
 import { createDaylight, fetchAirQuality, fetchWeather } from './daylight.js';
@@ -40,6 +40,7 @@ const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrenc
 const shotParams = new URLSearchParams(location.search);
 let quality = shotParams.get('q') || (coarseQuery.matches || weak ? 'low' : 'medium');
 const shotMode = shotParams.has('shot');
+const shotLookQuery = shotParams.get('look') || '';
 const forceNight = shotParams.has('night');
 if (shotMode) localStorage.setItem('usti-help-seen', '1');
 
@@ -722,6 +723,11 @@ function updateCamera() {
   camY = Math.max(player.y + 1.7, floor + 2.05, camY);
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
+  if (shotMode && (shotLook === 'down' || shotLookQuery === 'down')) {
+    camera.position.set(-player.x, player.y + 16, player.z);
+    camera.lookAt(-player.x, player.y, player.z);
+    return;
+  }
   if (shotMode && shotLook === 'marian') {
     camera.lookAt(-(player.x + fx * 36), player.y + 1.55 + sin * 8, player.z + fz * 36);
     return;
@@ -1603,9 +1609,11 @@ async function boot() {
     sample: terrain.sample.bind(terrain),
     waterY: city.waterY ?? 0.9,
     detail: true,
+    centerlines: city.centerlines,
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
+  if (asphalt?.geometry) seatRoadsToDecks(asphalt.geometry, bridges.decks);
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {
@@ -1691,7 +1699,7 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    shotLook = '';
+    shotLook = shotLookQuery === 'down' ? 'down' : '';
     const ok = placeNear(x, z, hashed[2], hashed[3]);
     if (Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
       faceMarianDeck();

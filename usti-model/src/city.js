@@ -731,7 +731,7 @@ function streetEdge(ring, roads) {
   return best ? best.index : longestIndex;
 }
 
-function drapeFlat(flat, sample, lift, parts, blocked) {
+function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
   const positions = [];
   const normals = [];
   for (let i = 0; i < flat.length; i += 6) {
@@ -740,6 +740,14 @@ function drapeFlat(flat, sample, lift, parts, blocked) {
       const x = flat[i + k * 2];
       const z = flat[i + k * 2 + 1];
       tri.push([x, sample(x, z) + lift, z]);
+    }
+    if (holdBank) {
+      const yMax = Math.max(tri[0][1], tri[1][1], tri[2][1]);
+      const yMin = Math.min(tri[0][1], tri[1][1], tri[2][1]);
+      if (yMax - yMin > 2.05) {
+        const floor = yMax - 1.25;
+        for (const vert of tri) vert[1] = Math.max(vert[1], floor);
+      }
     }
     const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
     const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
@@ -1243,7 +1251,7 @@ export async function buildCity(data, projector, hooks = {}) {
         && z <= block.maxZ
         && pointInRing(x, z, block.outer),
     );
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked);
+  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked, true);
   drapeFlat(roads.walk, sample, 0.14, walkParts, roadBlocked);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
@@ -1522,7 +1530,20 @@ export async function buildCity(data, projector, hooks = {}) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins, heroes };
+  return {
+    group,
+    collision,
+    start,
+    stats,
+    labels,
+    labelPoints,
+    trees,
+    waterMaterial,
+    waterY: riverY,
+    basins,
+    heroes,
+    centerlines: roads.centerlines,
+  };
 }
 
 function makeCollision(blockers, projector) {

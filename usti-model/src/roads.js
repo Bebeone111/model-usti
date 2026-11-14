@@ -1,7 +1,11 @@
 import { clipPolyline, distPointSeg, roadWidth } from './geom.js';
 
 const JOIN_TOL = 2.4;
+const STITCH_MAX = 16;
+const QUAY_STITCH_MAX = 24;
 const SIDEWALK = 1.65;
+const QUAY_NAME = /nábřež|přístav|předmost|labsk|bílinsk|bilinsk|hraž/i;
+const HERO_BRIDGE = /Mariánský most|Most Dr\.?\s*E\.?\s*Beneše/i;
 const WALK_WIDTH = {
   footway: 2.2,
   path: 1.8,
@@ -58,6 +62,7 @@ function prepareSegments(features, projector) {
     const key = String(tags.highway || '').replace(/_link$/, '');
     const kind = kindOf(key);
     if (!kind) continue;
+    if (tags.bridge === 'yes' && HERO_BRIDGE.test(String(tags.name || ''))) continue;
     const local = feature.geometry.coordinates.map(([lon, lat]) => projector.toLocal(lon, lat));
     let full = 0;
     for (let i = 1; i < local.length; i++) full += hypot(local[i - 1], local[i]);
@@ -181,6 +186,67 @@ function canJoin(s1, s2, dot, nodeDegree) {
   if (!sameClass(s1.key, s2.key)) return false;
   if (nodeDegree <= 2) return dot < 0.2;
   return dot < -0.84;
+}
+
+function quayName(name) {
+  return QUAY_NAME.test(name || '');
+}
+
+function stitchRoadGaps(segments) {
+  const ends = [];
+  segments.forEach((seg, i) => {
+    if (seg.closed || seg.kind !== 'asphalt') return;
+    ends.push({ i, end: 0, p: seg.pts[0], name: seg.name, key: seg.key });
+    ends.push({ i, end: 1, p: seg.pts[seg.pts.length - 1], name: seg.name, key: seg.key });
+  });
+  const cands = [];
+  for (let a = 0; a < ends.length; a++) {
+    for (let b = a + 1; b < ends.length; b++) {
+      const A = ends[a];
+      const B = ends[b];
+      if (A.i === B.i) continue;
+      const same = Boolean(A.name && A.name === B.name);
+      const family = quayName(A.name) && quayName(B.name);
+      if (!same && !family) continue;
+      const d = hypot(A.p, B.p);
+      const maxD = family || quayName(A.name) || quayName(B.name) ? QUAY_STITCH_MAX : STITCH_MAX;
+      if (d <= JOIN_TOL + 0.15 || d > maxD) continue;
+      const d1 = awayDir(segments[A.i], A.end);
+      const d2 = awayDir(segments[B.i], B.end);
+      const vx = B.p[0] - A.p[0];
+      const vz = B.p[1] - A.p[1];
+      const vl = Math.hypot(vx, vz) || 1;
+      const ux = vx / vl;
+      const uz = vz / vl;
+      if (-d1[0] * ux - d1[1] * uz < 0.08) continue;
+      if (d2[0] * ux + d2[1] * uz < 0.08) continue;
+      cands.push({ A, B, d });
+    }
+  }
+  cands.sort((x, y) => x.d - y.d);
+  const used = new Set();
+  for (const cand of cands) {
+    const ka = `${cand.A.i}:${cand.A.end}`;
+    const kb = `${cand.B.i}:${cand.B.end}`;
+    if (used.has(ka) || used.has(kb)) continue;
+    used.add(ka);
+    used.add(kb);
+    const segA = segments[cand.A.i];
+    const segB = segments[cand.B.i];
+    const h = Math.max(spanHalf(segA, cand.A.end), spanHalf(segB, cand.B.end));
+    segments.push({
+      pts: [cand.A.p, cand.B.p],
+      closed: false,
+      name: cand.A.name || cand.B.name,
+      key: cand.A.key,
+      kind: 'asphalt',
+      footway: '',
+      roundabout: false,
+      half: [h],
+      left: [Boolean(spanFlag(segA, cand.A.end, 'left') && spanFlag(segB, cand.B.end, 'left'))],
+      right: [Boolean(spanFlag(segA, cand.A.end, 'right') && spanFlag(segB, cand.B.end, 'right'))],
+    });
+  }
 }
 
 function joinSegments(segments) {
@@ -764,6 +830,7 @@ function suppressSeparateSides(segments) {
 export function buildRoadGeometry(features, projector) {
   const segments = prepareSegments(features, projector);
   suppressSeparateSides(segments);
+  stitchRoadGaps(segments);
   const { chains, joins } = joinSegments(segments);
   const asphalt = [];
   const walk = [];
