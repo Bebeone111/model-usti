@@ -13,7 +13,7 @@ import {
   startPreference,
   windowRows,
 } from './geom.js';
-import { buildRoadGeometry, makeLineIndex } from './roads.js';
+import { buildRoadGeometry, drapeQuayChains, makeLineIndex } from './roads.js';
 import { onDeck } from './bridges.js';
 
 const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
@@ -731,7 +731,7 @@ function streetEdge(ring, roads) {
   return best ? best.index : longestIndex;
 }
 
-function drapeFlat(flat, sample, lift, parts, blocked) {
+function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false) {
   const positions = [];
   const normals = [];
   for (let i = 0; i < flat.length; i += 6) {
@@ -740,6 +740,14 @@ function drapeFlat(flat, sample, lift, parts, blocked) {
       const x = flat[i + k * 2];
       const z = flat[i + k * 2 + 1];
       tri.push([x, sample(x, z) + lift, z]);
+    }
+    if (holdBank) {
+      const yMax = Math.max(tri[0][1], tri[1][1], tri[2][1]);
+      const yMin = Math.min(tri[0][1], tri[1][1], tri[2][1]);
+      if (yMax - yMin > 2.05) {
+        const floor = yMax - 1.15;
+        for (const vert of tri) vert[1] = Math.max(vert[1], floor);
+      }
     }
     const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
     const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
@@ -1243,7 +1251,7 @@ export async function buildCity(data, projector, hooks = {}) {
         && z <= block.maxZ
         && pointInRing(x, z, block.outer),
     );
-  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked);
+  drapeFlat(roads.asphalt, sample, 0.28, asphaltParts, roadBlocked, true);
   drapeFlat(roads.walk, sample, 0.14, walkParts, roadBlocked);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
@@ -1281,6 +1289,14 @@ export async function buildCity(data, projector, hooks = {}) {
     });
   }
   const riverY = riverHeights.length ? Math.min(...riverHeights) : 0.85;
+  if (roads.quayChains?.length) {
+    const quay = drapeQuayChains(roads.quayChains, sample, riverY);
+    if (quay.positions.length) asphaltParts.push({ positions: quay.positions, normals: quay.normals });
+    if (quay.centerlines.length) {
+      roads.centerlines.push(...quay.centerlines);
+      roads.quayCenterlines = quay.centerlines;
+    }
+  }
   for (const basin of basins) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
@@ -1522,7 +1538,21 @@ export async function buildCity(data, projector, hooks = {}) {
   const collision = makeCollision(blockers, projector);
   const start = findStart(highways, collision, projector, data.startHint);
   const labels = group.children.filter((child) => child.isSprite);
-  return { group, collision, start, stats, labels, labelPoints, trees, waterMaterial, waterY: riverY, basins, heroes };
+  return {
+    group,
+    collision,
+    start,
+    stats,
+    labels,
+    labelPoints,
+    trees,
+    waterMaterial,
+    waterY: riverY,
+    basins,
+    heroes,
+    centerlines: roads.centerlines,
+    quayCenterlines: roads.quayCenterlines || roads.centerlines,
+  };
 }
 
 function makeCollision(blockers, projector) {
@@ -1673,6 +1703,43 @@ export function terraceGround(geometry, collision, basins) {
     const z = pos.getZ(i);
     pos.setY(i, seatY(x, z, pos.getY(i), collision, basins));
   }
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+export function liftSunkRoads(geometry, radius = 14, maxLift = 8) {
+  if (!geometry?.attributes?.position) return;
+  const pos = geometry.attributes.position;
+  const n = pos.count;
+  const cell = 6;
+  const grid = new Map();
+  const key = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  for (let i = 0; i < n; i++) {
+    const k = key(pos.getX(i), pos.getZ(i));
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const next = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    let high = y;
+    const ix = Math.floor(x / cell);
+    const iz = Math.floor(z / cell);
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        for (const j of grid.get(`${ix + dx},${iz + dz}`) || []) {
+          const d = Math.hypot(x - pos.getX(j), z - pos.getZ(j));
+          if (d > radius) continue;
+          high = Math.max(high, pos.getY(j));
+        }
+      }
+    }
+    const lift = high - y;
+    next[i] = lift > 0.7 && lift < maxLift ? y + lift * 0.92 : y;
+  }
+  for (let i = 0; i < n; i++) pos.setY(i, next[i]);
   pos.needsUpdate = true;
   geometry.computeVertexNormals();
 }

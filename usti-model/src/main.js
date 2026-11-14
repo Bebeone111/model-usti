@@ -3,13 +3,13 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, liftSunkRoads, makeNameSprite, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
 import { createPlaces } from './places.js';
 import { addStreetFurniture, addTrolleys } from './furniture.js';
-import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks } from './bridges.js';
+import { addSignatureBridges, nearestWalkDeck, punchWaterUnderDecks, seatRoadsToDecks } from './bridges.js';
 import { addHeroBuildings } from './landmarks.js';
 import { addCableCar } from './cable.js';
 import { createDaylight, fetchAirQuality, fetchWeather } from './daylight.js';
@@ -40,6 +40,8 @@ const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrenc
 const shotParams = new URLSearchParams(location.search);
 let quality = shotParams.get('q') || (coarseQuery.matches || weak ? 'low' : 'medium');
 const shotMode = shotParams.has('shot');
+const shotLookQuery = shotParams.get('look') || '';
+const shotAlt = Number(shotParams.get('alt')) || 16;
 const forceNight = shotParams.has('night');
 if (shotMode) localStorage.setItem('usti-help-seen', '1');
 
@@ -520,6 +522,22 @@ function faceMarianDeck() {
   shotLook = 'marian';
 }
 
+function frameQuayJoin() {
+  const deck = (collision.decks || []).find((item) => item.name === 'marian' && item.walk);
+  const end = deck?.ends?.slice().sort((a, b) => b.z - a.z)[0];
+  if (!end) return false;
+  const a = { x: end.x + end.tx * 9, z: end.z + end.tz * 9 };
+  const b = { x: end.x - end.tx * 9, z: end.z - end.tz * 9 };
+  const pick = terrain.sample(a.x, a.z) >= terrain.sample(b.x, b.z) ? a : b;
+  player.x = pick.x;
+  player.z = pick.z;
+  player.yaw = Math.atan2(-(end.x - player.x), -(end.z - player.z));
+  player.pitch = -0.18;
+  player.y = walkHeight(collision, player.x, player.z, terrain.sample(player.x, player.z));
+  shotLook = 'join';
+  return true;
+}
+
 function goHome() {
   if (!api.start) return;
   placeNear(api.start.x, api.start.z, api.start.yaw, -0.4);
@@ -722,11 +740,14 @@ function updateCamera() {
   camY = Math.max(player.y + 1.7, floor + 2.05, camY);
   if (!thirdPerson) camY = player.y + 1.62;
   camera.position.set(-camX, camY, camZ);
-  if (shotMode && shotLook === 'down') {
-    camera.position.set(-player.x, player.y + 16, player.z);
-    camera.up.set(0, 0, 1);
+  if (shotMode && (shotLook === 'down' || shotLookQuery === 'down')) {
+    camera.position.set(-player.x, player.y + (Number.isFinite(shotAlt) && shotAlt > 4 ? shotAlt : 16), player.z);
     camera.lookAt(-player.x, player.y, player.z);
-    camera.up.set(0, 1, 0);
+    return;
+  }
+  if (shotMode && (shotLook === 'join' || shotLookQuery === 'join')) {
+    camera.position.set(-(player.x - fx * 9), player.y + 6.4, player.z - fz * 9);
+    camera.lookAt(-(player.x + fx * 10), player.y + 0.2, player.z + fz * 10);
     return;
   }
   if (shotMode && shotLook === 'marian') {
@@ -1610,9 +1631,14 @@ async function boot() {
     sample: terrain.sample.bind(terrain),
     waterY: city.waterY ?? 0.9,
     detail: true,
+    centerlines: city.quayCenterlines || city.centerlines,
   });
   collision.decks = bridges.decks;
   collision.rails = bridges.rails;
+  if (asphalt?.geometry) {
+    seatRoadsToDecks(asphalt.geometry, bridges.decks);
+    liftSunkRoads(asphalt.geometry);
+  }
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {
@@ -1698,7 +1724,11 @@ async function boot() {
     const hashed = readHash();
     if (!hashed) return false;
     const [x, z] = projector.toLocal(hashed[0], hashed[1]);
-    if (shotParams.get('look') !== 'down') shotLook = '';
+    shotLook = shotLookQuery === 'down' ? 'down' : shotLookQuery === 'join' ? 'join' : '';
+    if (shotLookQuery === 'join') {
+      frameQuayJoin();
+      return true;
+    }
     const ok = placeNear(x, z, hashed[2], hashed[3]);
     if (Math.abs(hashed[0] - 14.05296) < 0.0008 && Math.abs(hashed[1] - 50.66107) < 0.0008) {
       faceMarianDeck();

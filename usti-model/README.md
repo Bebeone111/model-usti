@@ -53,6 +53,7 @@ Přechody (`highway=crossing` v OSM) se přichytí na střed nejbližší vozovk
 - **Muzeum města** v bboxu nemá pojmenovaný OSM půdorys, proto v modelu není. Divadlo (way 79413889) ano.
 - **Multiplayer** (blok F) a Mapillary / splat / GIS města (blok G) nejsou.
 - **Pohled z vody** po pevné cestě není. Lanovka na Větruši je z fallback osy, pokud Overpass aerialway v bboxu nic nevrátí.
+- **Vozovka na nábřeží** spojuje úseky Přístavní / Předmostí / Bílinské a nábřeží Labe i Bíliny, které OSM nechává s mezerami. Desky Mariánského mostu a mostu Beneše navazují na nábřeží ve stejné výšce. Terén se kvůli tomu neprohýbá, voda zůstává `usti-water-flat-v1`.
 
 ## Poznámky k v4 (co se přeskočilo)
 
