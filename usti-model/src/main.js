@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1521,7 +1521,6 @@ async function boot() {
   );
   view.add(city.group);
   collision = city.collision;
-  terrain.sample = wrapSeatSample(terrain.sample.bind(terrain), collision, city.basins);
   const asphalt = city.group.getObjectByName('asphalt');
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
