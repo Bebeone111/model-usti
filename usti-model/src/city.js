@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Earcut } from 'three/src/extras/Earcut.js';
 import {
   buildingBase,
   buildingHeight,
@@ -90,26 +90,35 @@ function orient(ring, ccw) {
 }
 
 function triangulate(outer, holes, y, normalY) {
-  const contour = outer.map(([x, z]) => new THREE.Vector2(x, z));
-  const holePts = holes.map((hole) => hole.map(([x, z]) => new THREE.Vector2(x, z)));
-  let faces;
+  if (!outer || outer.length < 3) return null;
+  const vertices = [];
+  for (const p of outer) vertices.push(p[0], p[1]);
+  const holeIndices = [];
+  for (const hole of holes || []) {
+    if (!hole || hole.length < 3) continue;
+    holeIndices.push(vertices.length / 2);
+    for (const p of hole) vertices.push(p[0], p[1]);
+  }
+  let idx;
   try {
-    faces = THREE.ShapeUtils.triangulateShape(contour, holePts);
+    idx = Earcut.triangulate(vertices, holeIndices, 2);
   } catch {
     return null;
   }
-  const flat = contour.concat(...holePts);
-  const positions = [];
-  const normals = [];
-  for (const face of faces) {
-    for (const index of face) {
-      const p = flat[index];
-      if (!p) return null;
-      positions.push(p.x, y, p.y);
-      normals.push(0, normalY, 0);
-    }
+  if (!idx?.length) return null;
+  const positions = new Array(idx.length * 3);
+  const normals = new Array(idx.length * 3);
+  for (let i = 0; i < idx.length; i++) {
+    const v = idx[i] * 2;
+    const o = i * 3;
+    positions[o] = vertices[v];
+    positions[o + 1] = y;
+    positions[o + 2] = vertices[v + 1];
+    normals[o] = 0;
+    normals[o + 1] = normalY;
+    normals[o + 2] = 0;
   }
-  return positions.length ? { positions, normals } : null;
+  return { positions, normals };
 }
 
 function wallStrip(ring, groundAt, base, top, floors = 3) {
@@ -128,7 +137,7 @@ function wallStrip(ring, groundAt, base, top, floors = 3) {
     if (len < 0.05) continue;
     const nx = dz / len;
     const nz = -dx / len;
-    const pieces = Math.max(1, Math.ceil(len / 7));
+    const pieces = Math.max(1, Math.ceil(len / 22));
     for (let s = 0; s < pieces; s++) {
       const t0 = s / pieces;
       const t1 = (s + 1) / pieces;
@@ -217,11 +226,7 @@ function geometryFromParts(parts) {
 }
 
 function mergeList(list) {
-  const geometries = list.filter(Boolean).map((geometry) => (geometry.index ? geometry.toNonIndexed() : geometry));
-  if (!geometries.length) return null;
-  const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
-  if (geometries.length > 1) geometries.forEach((geometry) => geometry.dispose());
-  return merged;
+  return geometryFromParts((list || []).filter(Boolean));
 }
 
 function polygonBounds(rings) {
@@ -1183,7 +1188,6 @@ export async function buildCity(data, projector, hooks = {}) {
   };
   const styledParts = Object.fromEntries(Object.keys(FACADE).map((name) => [name, { walls: [], roofs: [] }]));
   const doorParts = [];
-  const floorParts = [];
   const walkParts = [];
   const asphaltParts = [];
   const waterParts = [];
@@ -1273,42 +1277,34 @@ export async function buildCity(data, projector, hooks = {}) {
       if (pitched) {
         const rise = Math.min(4.6, Math.max(1.6, Math.sqrt(area) * 0.22));
         const hip = pyramidRoof(outer, sample, top, rise);
-        if (hip) roofTarget.push(geometryFromParts([hip]));
+        if (hip) roofTarget.push(hip);
       } else {
         const roof = triangulate(outer, holes, 0, 1);
         if (roof) {
           const p = roof.positions;
           for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + top + 0.35;
-          roofTarget.push(geometryFromParts([roof]));
+          roofTarget.push(roof);
         }
       }
-      const floor = triangulate(outer, holes, 0, 1);
-      if (floor) {
-        const p = floor.positions;
-        for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + base + 0.05;
-        floorParts.push(floor);
-      }
-      const walls = geometryFromParts(strips);
-      if (walls) {
-        if (styleName) styledParts[styleName].walls.push(walls);
-        else if (taggedWall) extraBucket(extraWalls, taggedWall).push(walls);
-        else {
-          const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
-          bucket.push(walls);
-        }
-      }
+      const wallTarget = styleName
+        ? styledParts[styleName].walls
+        : taggedWall
+          ? extraBucket(extraWalls, taggedWall)
+          : rows > 0
+            ? wallBuckets[wallIndex].windows
+            : wallBuckets[wallIndex].plain;
+      for (const strip of strips) wallTarget.push(strip);
       const door = doorStrip(outer, sample, base, top, streetEdge(outer, carriageways));
       if (door) doorParts.push(door);
       const closedOuter = outer.concat([outer[0]]);
       const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
       const bounds = polygonBounds([closedOuter, ...closedHoles]);
-      let groundY = Infinity;
-      for (const p of outer) groundY = Math.min(groundY, sample(p[0], p[1]));
+      const [gx, gz] = ringCentroid(outer);
       blockers.push({
         outer: closedOuter,
         holes: closedHoles,
         top,
-        groundY: Number.isFinite(groundY) ? groundY : sample(outer[0][0], outer[0][1]),
+        groundY: sample(gx, gz),
         blocksWalk: true,
         blocksCamera: true,
         ...bounds,
@@ -1329,7 +1325,7 @@ export async function buildCity(data, projector, hooks = {}) {
     });
     if (placed) stats.buildings += 1;
     else stats.skippedBuildings += 1;
-    if (stats.buildings > 0 && stats.buildings % 40 === 0) {
+    if (stats.buildings > 0 && stats.buildings % 400 === 0) {
       await tick('buildings', stats.buildings, (buildings.features || []).length);
     }
   }
@@ -1363,7 +1359,7 @@ export async function buildCity(data, projector, hooks = {}) {
         const hole = orient(clipPolygon(projectRing(coords[i], projector), ...box), false);
         if (hole) holes.push(hole);
       }
-      const edge = densify(outer.concat([outer[0]]), 8);
+      const edge = densify(outer.concat([outer[0]]), 24);
       const samples = [];
       for (const p of edge) samples.push(sample(p[0], p[1]));
       samples.sort((a, b) => a - b);
@@ -1382,8 +1378,8 @@ export async function buildCity(data, projector, hooks = {}) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
     const flat = triangulate(
-      densify(basin.outer.concat([basin.outer[0]]), 14).slice(0, -1),
-      holes.map((hole) => densify(hole.concat([hole[0]]), 14).slice(0, -1)),
+      densify(basin.outer.concat([basin.outer[0]]), 28).slice(0, -1),
+      holes.map((hole) => densify(hole.concat([hole[0]]), 28).slice(0, -1)),
       basin.y,
       1,
     );
@@ -1430,7 +1426,7 @@ export async function buildCity(data, projector, hooks = {}) {
         best = { area, x, z, y: sample(x, z) + 8 };
       }
         if (!pointInRing(startX, startZ, outer)) {
-        const edge = densify(outer.concat([outer[0]]), 14);
+        const edge = densify(outer.concat([outer[0]]), 32);
         const flat = triangulate(edge.slice(0, -1), [], 0, 1);
         if (flat) parkParts.push(conformSurface(flat, sample, 0.06));
       }
@@ -1500,15 +1496,6 @@ export async function buildCity(data, projector, hooks = {}) {
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
-  }
-  const floors = geometryFromParts(floorParts);
-  if (floors) {
-    const floorMesh = new THREE.Mesh(
-      floors,
-      new THREE.MeshLambertMaterial({ color: 0x8d8880, side: THREE.DoubleSide }),
-    );
-    floorMesh.name = 'floors';
-    group.add(floorMesh);
   }
 
   const parks = geometryFromParts(parkParts);

@@ -105,11 +105,20 @@ function clipHalfPlane(points, inside, edge) {
 export function clipPolygon(ring, minX, minZ, maxX, maxZ) {
   let pts = cleanRing(ring);
   if (pts.length < 3) return null;
-  pts = clipHalfPlane(pts, (p) => p[0] >= minX, (a, b) => intersect(a, b, minX, 'x'));
-  pts = clipHalfPlane(pts, (p) => p[0] <= maxX, (a, b) => intersect(a, b, maxX, 'x'));
-  pts = clipHalfPlane(pts, (p) => p[1] >= minZ, (a, b) => intersect(a, b, minZ, 'z'));
-  pts = clipHalfPlane(pts, (p) => p[1] <= maxZ, (a, b) => intersect(a, b, maxZ, 'z'));
-  pts = cleanRing(pts);
+  let inside = true;
+  for (const p of pts) {
+    if (p[0] < minX || p[0] > maxX || p[1] < minZ || p[1] > maxZ) {
+      inside = false;
+      break;
+    }
+  }
+  if (!inside) {
+    pts = clipHalfPlane(pts, (p) => p[0] >= minX, (a, b) => intersect(a, b, minX, 'x'));
+    pts = clipHalfPlane(pts, (p) => p[0] <= maxX, (a, b) => intersect(a, b, maxX, 'x'));
+    pts = clipHalfPlane(pts, (p) => p[1] >= minZ, (a, b) => intersect(a, b, minZ, 'z'));
+    pts = clipHalfPlane(pts, (p) => p[1] <= maxZ, (a, b) => intersect(a, b, maxZ, 'z'));
+    pts = cleanRing(pts);
+  }
   if (pts.length < 3 || Math.abs(signedArea(pts)) < 1.2) return null;
   return pts;
 }

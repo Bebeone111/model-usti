@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -1575,18 +1575,13 @@ async function boot() {
         const ratio = total ? done / Math.max(total, 1) : 0.4;
         const label = phase === 'buildings' ? `Sestavuji budovy… ${done}` : 'Skládám město…';
         setProgress(0.78 + ratio * 0.18, label);
-        return new Promise((resolve) => setTimeout(resolve, 0));
       },
     },
   );
   view.add(city.group);
   collision = city.collision;
   terrain.sample = wrapSeatSample(terrain.sample.bind(terrain), collision, city.basins);
-  const ground = view.getObjectByName('ground');
   const asphalt = city.group.getObjectByName('asphalt');
-  const parks = city.group.getObjectByName('parks');
-  if (ground?.geometry) terraceGround(ground.geometry, collision, city.basins);
-  if (parks?.geometry) terraceGround(parks.geometry, collision, city.basins);
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
   labels = city.labels;
