@@ -1009,9 +1009,14 @@ export function buildRoadGeometry(features, projector) {
     } else if (chain.kind === 'pave') {
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
       emitRoad(chain, pave);
-    } else {
-      // Independent footways drape as leftover slabs on the hillside.
-      // Sidewalks stay on emitSides along the carriageway.
+    } else if (
+      chain.kind === 'walk'
+      && chain.footway !== 'crossing'
+      && chain.footway !== 'traffic_island'
+      && chain.key !== 'steps'
+      && chain.key !== 'path'
+    ) {
+      emitRoad(chain, walk);
     }
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }

@@ -175,6 +175,7 @@ let labels = [];
 let bob = 0;
 let gait = 0;
 let groundMat = null;
+const GROUND_REST = new THREE.Color(0x6a6660);
 let waterMat = null;
 let lampMat = null;
 let poiMarks = [];
@@ -999,14 +1000,7 @@ function setProgress(ratio, step) {
   statusEl.textContent = step;
 }
 
-function addGround(texture, grid) {
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  const anisotropy = renderer.capabilities.getMaxAnisotropy() || 8;
-  texture.anisotropy = anisotropy;
-  texture.needsUpdate = true;
+function addGround(_texture, grid) {
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
   const rows = grid.height;
@@ -1093,14 +1087,8 @@ function addGround(texture, grid) {
   if (up < 0) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
-  if (texture) {
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-  }
   groundMat = new THREE.MeshBasicMaterial({
-    map: texture || null,
-    color: texture ? 0xffffff : 0x5f7a48,
+    color: GROUND_REST,
     side: THREE.DoubleSide,
     toneMapped: false,
   });
@@ -1367,7 +1355,10 @@ function frame(now) {
       const aqi = Number.isFinite(airQuality?.european_aqi) ? ` · AQI ${Math.round(airQuality.european_aqi)}` : '';
       clockEl.textContent = `${skyState.clock}${aqi}`;
       document.querySelector('#menu-clock').textContent = clockEl.textContent;
-      if (groundMat) groundMat.color.setScalar((1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1));
+      if (groundMat) {
+        const shade = (1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1);
+        groundMat.color.copy(GROUND_REST).multiplyScalar(shade);
+      }
       if (waterMat) {
         waterMat.opacity = skyState.wet ? 0.86 : 0.72;
         waterMat.color.set(skyState.wet ? 0x123f52 : 0x1a6d88);
@@ -1517,7 +1508,7 @@ async function boot() {
   const pavingTex = await loadPublicTexture('/textures/paving.jpg');
   const plazaTex = await loadPublicTexture('/textures/plaza.jpg');
   const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
-  addGround(grassTex, terrain);
+  addGround(null, terrain);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1531,6 +1522,7 @@ async function boot() {
       asphaltMap: asphaltTex,
       paveMap: pavingTex,
       plazaMap: plazaTex,
+      grassMap: grassTex,
     },
     projector,
     {
