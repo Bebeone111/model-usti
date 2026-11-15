@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, terraceGround, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -999,7 +999,7 @@ function setProgress(ratio, step) {
   statusEl.textContent = step;
 }
 
-function addGround(texture, grid, pavingTex) {
+function addGround(texture, grid) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -1007,13 +1007,6 @@ function addGround(texture, grid, pavingTex) {
   const anisotropy = renderer.capabilities.getMaxAnisotropy() || 8;
   texture.anisotropy = anisotropy;
   texture.needsUpdate = true;
-  const pave = pavingTex || new THREE.DataTexture(new Uint8Array([190, 184, 174, 255]), 1, 1);
-  pave.colorSpace = THREE.SRGBColorSpace;
-  pave.wrapS = THREE.RepeatWrapping;
-  pave.wrapT = THREE.RepeatWrapping;
-  pave.anisotropy = anisotropy;
-  pave.generateMipmaps = true;
-  pave.needsUpdate = true;
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
   const rows = grid.height;
@@ -1100,50 +1093,7 @@ function addGround(texture, grid, pavingTex) {
   if (up < 0) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
-  groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide });
-  const texel = new THREE.Vector2(1 / Math.max(1, texture.image?.width || 3605), 1 / Math.max(1, texture.image?.height || 2733));
-  groundMat.onBeforeCompile = (shader) => {
-    shader.uniforms.paveMap = { value: pave };
-    shader.uniforms.uHasPave = { value: pavingTex ? 1 : 0 };
-    shader.uniforms.uTexel = { value: texel };
-    const sq = projector.toLocal(14.040439, 50.660244);
-    shader.uniforms.uSquare = { value: new THREE.Vector2(sq[0], sq[1]) };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying float vCamDist;\nvarying vec2 vGround;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDist = length(mvPosition.xyz);\nvGround = position.xz;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <map_pars_fragment>',
-        '#include <map_pars_fragment>\nvarying float vCamDist;\nvarying vec2 vGround;\nuniform sampler2D paveMap;\nuniform float uHasPave;\nuniform vec2 uTexel;\nuniform vec2 uSquare;',
-      )
-      .replace(
-        '#include <map_fragment>',
-        `#include <map_fragment>
-        vec3 blur = (
-          texture2D(map, vMapUv + vec2(uTexel.x, 0.0)).rgb +
-          texture2D(map, vMapUv - vec2(uTexel.x, 0.0)).rgb +
-          texture2D(map, vMapUv + vec2(0.0, uTexel.y)).rgb +
-          texture2D(map, vMapUv - vec2(0.0, uTexel.y)).rgb
-        ) * 0.25;
-        vec3 photo = diffuseColor.rgb;
-        vec3 sharp = clamp(photo + (photo - blur) * 0.95, 0.0, 1.0);
-        float luma = dot(sharp, vec3(0.30, 0.55, 0.15));
-        float green = sharp.g - max(sharp.r, sharp.b);
-        float pale = smoothstep(0.28, 0.48, luma);
-        vec3 settled = mix(sharp, sharp * vec3(0.62, 0.60, 0.56), pale);
-        float nearMix = 1.0 - smoothstep(6.0, 140.0, vCamDist);
-        vec3 stones = texture2D(paveMap, vGround * 0.62).rgb;
-        float grain = fract(sin(dot(vGround, vec2(12.9898, 78.233))) * 43758.5453);
-        vec3 stonesB = texture2D(paveMap, vGround * 0.31 + 0.17).rgb;
-        vec3 mixedStones = mix(stones, stonesB, 0.35 + 0.2 * grain);
-        float square = 1.0 - smoothstep(8.0, 36.0, length(vGround - vec2(uSquare.x, uSquare.y)));
-        float grass = smoothstep(0.02, 0.08, green);
-        vec3 paved = mix(mixedStones, settled, 0.16);
-        float cover = mix(nearMix, 1.0, square * 0.85) * (1.0 - 0.72 * grass) * uHasPave;
-        diffuseColor.rgb = mix(photo, paved, cover);`
-      );
-  };
-  groundMat.customProgramCacheKey = () => 'usti-ground-v7-cover';
+  groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1459,12 +1409,6 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
-function loadPublicTexture(url) {
-  return new Promise((resolve) => {
-    new THREE.TextureLoader().load(url, resolve, undefined, () => resolve(null));
-  });
-}
-
 function detailZones(water) {
   const segments = [];
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
@@ -1554,9 +1498,7 @@ async function boot() {
     detail = null;
   }
   terrain = makeTerrain(terrainGrid, projector, detail);
-  const pavingTex = await loadPublicTexture('/textures/paving.jpg');
-  const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
-  addGround(texture, terrain, pavingTex);
+  addGround(texture, terrain);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1567,7 +1509,6 @@ async function boot() {
       trees: loaded.trees,
       startHint: area.startHint,
       terrain,
-      asphaltMap: asphaltTex,
     },
     projector,
     {
@@ -1575,18 +1516,13 @@ async function boot() {
         const ratio = total ? done / Math.max(total, 1) : 0.4;
         const label = phase === 'buildings' ? `Sestavuji budovy… ${done}` : 'Skládám město…';
         setProgress(0.78 + ratio * 0.18, label);
-        return new Promise((resolve) => setTimeout(resolve, 0));
       },
     },
   );
   view.add(city.group);
   collision = city.collision;
   terrain.sample = wrapSeatSample(terrain.sample.bind(terrain), collision, city.basins);
-  const ground = view.getObjectByName('ground');
   const asphalt = city.group.getObjectByName('asphalt');
-  const parks = city.group.getObjectByName('parks');
-  if (ground?.geometry) terraceGround(ground.geometry, collision, city.basins);
-  if (parks?.geometry) terraceGround(parks.geometry, collision, city.basins);
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
   labels = city.labels;

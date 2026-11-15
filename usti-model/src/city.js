@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Earcut } from 'three/src/extras/Earcut.js';
 import {
   buildingBase,
   buildingHeight,
@@ -90,26 +90,35 @@ function orient(ring, ccw) {
 }
 
 function triangulate(outer, holes, y, normalY) {
-  const contour = outer.map(([x, z]) => new THREE.Vector2(x, z));
-  const holePts = holes.map((hole) => hole.map(([x, z]) => new THREE.Vector2(x, z)));
-  let faces;
+  if (!outer || outer.length < 3) return null;
+  const vertices = [];
+  for (const p of outer) vertices.push(p[0], p[1]);
+  const holeIndices = [];
+  for (const hole of holes || []) {
+    if (!hole || hole.length < 3) continue;
+    holeIndices.push(vertices.length / 2);
+    for (const p of hole) vertices.push(p[0], p[1]);
+  }
+  let idx;
   try {
-    faces = THREE.ShapeUtils.triangulateShape(contour, holePts);
+    idx = Earcut.triangulate(vertices, holeIndices, 2);
   } catch {
     return null;
   }
-  const flat = contour.concat(...holePts);
-  const positions = [];
-  const normals = [];
-  for (const face of faces) {
-    for (const index of face) {
-      const p = flat[index];
-      if (!p) return null;
-      positions.push(p.x, y, p.y);
-      normals.push(0, normalY, 0);
-    }
+  if (!idx?.length) return null;
+  const positions = new Array(idx.length * 3);
+  const normals = new Array(idx.length * 3);
+  for (let i = 0; i < idx.length; i++) {
+    const v = idx[i] * 2;
+    const o = i * 3;
+    positions[o] = vertices[v];
+    positions[o + 1] = y;
+    positions[o + 2] = vertices[v + 1];
+    normals[o] = 0;
+    normals[o + 1] = normalY;
+    normals[o + 2] = 0;
   }
-  return positions.length ? { positions, normals } : null;
+  return { positions, normals };
 }
 
 function wallStrip(ring, groundAt, base, top, floors = 3) {
@@ -128,7 +137,7 @@ function wallStrip(ring, groundAt, base, top, floors = 3) {
     if (len < 0.05) continue;
     const nx = dz / len;
     const nz = -dx / len;
-    const pieces = Math.max(1, Math.ceil(len / 7));
+    const pieces = Math.max(1, Math.ceil(len / 22));
     for (let s = 0; s < pieces; s++) {
       const t0 = s / pieces;
       const t1 = (s + 1) / pieces;
@@ -217,11 +226,7 @@ function geometryFromParts(parts) {
 }
 
 function mergeList(list) {
-  const geometries = list.filter(Boolean).map((geometry) => (geometry.index ? geometry.toNonIndexed() : geometry));
-  if (!geometries.length) return null;
-  const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
-  if (geometries.length > 1) geometries.forEach((geometry) => geometry.dispose());
-  return merged;
+  return geometryFromParts((list || []).filter(Boolean));
 }
 
 function polygonBounds(rings) {
@@ -731,99 +736,6 @@ function streetEdge(ring, roads) {
   return best ? best.index : longestIndex;
 }
 
-function pushRoadTri(positions, normals, a, b, c) {
-  const ux = b[0] - a[0];
-  const uy = b[1] - a[1];
-  const uz = b[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  let nx = uy * vz - uz * vy;
-  let ny = uz * vx - ux * vz;
-  let nz = ux * vy - uy * vx;
-  const len = Math.hypot(nx, ny, nz) || 1;
-  nx /= len;
-  ny /= len;
-  nz /= len;
-  if (ny < 0) {
-    nx = -nx;
-    ny = -ny;
-    nz = -nz;
-    positions.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
-  } else {
-    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-  }
-  for (let k = 0; k < 3; k++) normals.push(nx, ny, nz);
-}
-
-function ribbonHalfAt(line, i) {
-  const h = line.half;
-  if (!h?.length) return 3.4;
-  if (i <= 0) return h[0];
-  if (i >= h.length) return h[h.length - 1];
-  return Math.max(h[Math.min(i, h.length - 1)], h[Math.min(i - 1, h.length - 1)]);
-}
-
-function waterTest(water, projector, box, sample) {
-  const rings = [];
-  for (const feature of water.features || []) {
-    eachPolygon(feature.geometry, (coords) => {
-      if (!coords?.[0]) return;
-      const outer = orient(clipPolygon(projectRing(coords[0], projector), ...box), true);
-      if (!outer) return;
-      const closed = outer.concat([outer[0]]);
-      const edge = densify(closed, 12);
-      let y = Infinity;
-      for (const p of edge) y = Math.min(y, sample(p[0], p[1]));
-      rings.push({ outer: closed, y: Number.isFinite(y) ? y : 0.9, ...polygonBounds([closed]) });
-    });
-  }
-  const g = 4;
-  const wetSet = new Set();
-  const shoreSet = new Set();
-  const keyAt = (x, z) => `${Math.floor(x / g)},${Math.floor(z / g)}`;
-  const scanFill = (ring, pred) => {
-    const closed = ring;
-    for (let z = Math.min(...closed.map((p) => p[1])); z <= Math.max(...closed.map((p) => p[1])); z += g) {
-      const xs = [];
-      for (let i = 0; i < closed.length - 1; i++) {
-        const a = closed[i];
-        const b = closed[i + 1];
-        if ((a[1] <= z && b[1] > z) || (b[1] <= z && a[1] > z)) {
-          xs.push(a[0] + ((z - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
-        }
-      }
-      xs.sort((a, b) => a - b);
-      for (let i = 0; i + 1 < xs.length; i += 2) {
-        const x0 = xs[i];
-        const x1 = xs[i + 1];
-        for (let x = x0; x <= x1; x += g) {
-          if (!pred || pred(x, z)) wetSet.add(keyAt(x, z));
-        }
-      }
-    }
-  };
-  for (const r of rings) {
-    scanFill(r.outer, (x, z) => sample(x, z) <= r.y + 0.08);
-    const edge = densify(r.outer, 10);
-    const n = Math.ceil(40 / g);
-    const n2 = n * n;
-    for (const p of edge) {
-      const ix = Math.floor(p[0] / g);
-      const iz = Math.floor(p[1] / g);
-      for (let dx = -n; dx <= n; dx++) {
-        for (let dz = -n; dz <= n; dz++) {
-          if (dx * dx + dz * dz <= n2) shoreSet.add(`${ix + dx},${iz + dz}`);
-        }
-      }
-    }
-  }
-  return {
-    wet: (x, z) => wetSet.has(keyAt(x, z)),
-    nearShore: (x, z) => shoreSet.has(keyAt(x, z)),
-  };
-}
-
 function queryBlockers(blockers) {
   const size = 32;
   const bins = new Map();
@@ -857,451 +769,6 @@ function queryBlockers(blockers) {
     }
     return false;
   };
-}
-
-function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
-  const cell = 1.2;
-  const covered = new Map();
-  const disks = [];
-  const wet = waterMask?.wet || (() => false);
-  const nearShore = waterMask?.nearShore || (() => false);
-  const wall = typeof blocked === 'function' ? blocked : () => false;
-  const mark = (ix, iz) => {
-    const key = `${ix},${iz}`;
-    if (covered.has(key)) return;
-    const x = (ix + 0.5) * cell;
-    const z = (iz + 0.5) * cell;
-    if (wet(x, z) || wall(x, z)) return;
-    covered.set(key, { ix, iz, x, z, y: sample(x, z) + lift });
-  };
-  const markDisk = (cx, cz, r) => {
-    const minIx = Math.floor((cx - r) / cell);
-    const maxIx = Math.floor((cx + r) / cell);
-    const minIz = Math.floor((cz - r) / cell);
-    const maxIz = Math.floor((cz + r) / cell);
-    const r2 = r * r;
-    for (let ix = minIx; ix <= maxIx; ix++) {
-      for (let iz = minIz; iz <= maxIz; iz++) {
-        const x = (ix + 0.5) * cell;
-        const z = (iz + 0.5) * cell;
-        if ((x - cx) * (x - cx) + (z - cz) * (z - cz) <= r2) mark(ix, iz);
-      }
-    }
-  };
-  const markSeg = (a, b, half) => {
-    const reach = Math.max(3.6, half + 0.6) + cell * 0.55;
-    const minIx = Math.floor((Math.min(a[0], b[0]) - reach) / cell);
-    const maxIx = Math.floor((Math.max(a[0], b[0]) + reach) / cell);
-    const minIz = Math.floor((Math.min(a[1], b[1]) - reach) / cell);
-    const maxIz = Math.floor((Math.max(a[1], b[1]) + reach) / cell);
-    for (let ix = minIx; ix <= maxIx; ix++) {
-      for (let iz = minIz; iz <= maxIz; iz++) {
-        const x = (ix + 0.5) * cell;
-        const z = (iz + 0.5) * cell;
-        if (distPointSeg(x, z, a[0], a[1], b[0], b[1]) <= reach) mark(ix, iz);
-      }
-    }
-  };
-  for (const line of lines || []) {
-    if (line.quay || !line.pts || line.pts.length < 2) continue;
-    const pts = line.pts;
-    const n = pts.length;
-    if (line.closed && n >= 5) {
-      let cx = 0;
-      let cz = 0;
-      for (const p of pts) {
-        cx += p[0];
-        cz += p[1];
-      }
-      cx /= n;
-      cz /= n;
-      let r = line.diskR || 0;
-      for (let i = 0; i < n; i++) {
-        r = Math.max(r, Math.hypot(pts[i][0] - cx, pts[i][1] - cz) + ribbonHalfAt(line, i));
-      }
-      if (r > 6 && r < 18) {
-        markDisk(cx, cz, r);
-        disks.push({ x: cx, z: cz, r });
-      }
-    }
-    const segs = line.closed ? n : n - 1;
-    for (let i = 0; i < segs; i++) {
-      markSeg(pts[i], pts[(i + 1) % n], ribbonHalfAt(line, i));
-    }
-  }
-  const medBin = 12;
-  const medBins = new Map();
-  const medSamples = [];
-  let medId = 0;
-  for (const line of lines || []) {
-    if (line.quay || !line.pts || line.pts.length < 2) continue;
-    medId += 1;
-    const pts = line.pts;
-    const n = pts.length;
-    const segs = line.closed ? n : n - 1;
-    for (let i = 0; i < segs; i++) {
-      const a = pts[i];
-      const b = pts[(i + 1) % n];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const steps = Math.max(1, Math.ceil(len / 7));
-      for (let k = 0; k < steps; k++) {
-        const t = k / steps;
-        const rec = {
-          x: a[0] + (b[0] - a[0]) * t,
-          z: a[1] + (b[1] - a[1]) * t,
-          dx: b[0] - a[0],
-          dz: b[1] - a[1],
-          id: medId,
-        };
-        medSamples.push(rec);
-        const key = `${Math.floor(rec.x / medBin)},${Math.floor(rec.z / medBin)}`;
-        if (!medBins.has(key)) medBins.set(key, []);
-        medBins.get(key).push(rec);
-      }
-    }
-  }
-  for (const a of medSamples) {
-    const ix = Math.floor(a.x / medBin);
-    const iz = Math.floor(a.z / medBin);
-    let best = null;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const list = medBins.get(`${ix + dx},${iz + dz}`);
-        if (!list) continue;
-        for (const b of list) {
-          if (b.id === a.id) continue;
-          const d = Math.hypot(a.x - b.x, a.z - b.z);
-          if (d < 5.5 || d > 16) continue;
-          const la = Math.hypot(a.dx, a.dz) || 1;
-          const lb = Math.hypot(b.dx, b.dz) || 1;
-          if (Math.abs((a.dx * b.dx + a.dz * b.dz) / (la * lb)) < 0.7) continue;
-          if (!best || d < best.d) best = { b, d };
-        }
-      }
-    }
-    if (best) markSeg([a.x, a.z], [best.b.x, best.b.z], Math.min(8, best.d * 0.55));
-  }
-  const roundPts = [];
-  for (const line of lines || []) {
-    if (line.quay || !line.pts) continue;
-    if (!(line.closed || line.roundabout)) continue;
-    for (const p of line.pts) roundPts.push(p);
-  }
-  const used = new Set();
-  for (let i = 0; i < roundPts.length; i++) {
-    if (used.has(i)) continue;
-    const cluster = [roundPts[i]];
-    used.add(i);
-    for (let j = i + 1; j < roundPts.length; j++) {
-      if (used.has(j)) continue;
-      if (cluster.some((p) => Math.hypot(p[0] - roundPts[j][0], p[1] - roundPts[j][1]) < 22)) {
-        cluster.push(roundPts[j]);
-        used.add(j);
-      }
-    }
-    if (cluster.length < 4) continue;
-    let cx = 0;
-    let cz = 0;
-    for (const p of cluster) {
-      cx += p[0];
-      cz += p[1];
-    }
-    cx /= cluster.length;
-    cz /= cluster.length;
-    let r = 0;
-    for (const p of cluster) r = Math.max(r, Math.hypot(p[0] - cx, p[1] - cz));
-    r = Math.min(16, r + 4);
-    if (r > 7) {
-      markDisk(cx, cz, r);
-      disks.push({ x: cx, z: cz, r });
-    }
-  }
-  const dilate = () => {
-    const seed = [...covered.values()];
-    for (const rec of seed) {
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          if (dx || dz) mark(rec.ix + dx, rec.iz + dz);
-        }
-      }
-    }
-  };
-  dilate();
-  const parent = new Map();
-  const find = (k) => {
-    let cur = k;
-    while (parent.get(cur) !== cur) cur = parent.get(cur);
-    parent.set(k, cur);
-    return cur;
-  };
-  const uni = (a, b) => {
-    a = find(a);
-    b = find(b);
-    if (a !== b) parent.set(a, b);
-  };
-  const relink = () => {
-    parent.clear();
-    for (const rec of covered.values()) {
-      const k = `${rec.ix},${rec.iz}`;
-      parent.set(k, k);
-    }
-    for (const rec of covered.values()) {
-      const k = `${rec.ix},${rec.iz}`;
-      if (parent.has(`${rec.ix + 1},${rec.iz}`)) uni(k, `${rec.ix + 1},${rec.iz}`);
-      if (parent.has(`${rec.ix},${rec.iz + 1}`)) uni(k, `${rec.ix},${rec.iz + 1}`);
-    }
-  };
-  relink();
-  const groups = new Map();
-  for (const rec of covered.values()) {
-    const id = find(`${rec.ix},${rec.iz}`);
-    if (!groups.has(id)) groups.set(id, []);
-    groups.get(id).push(rec);
-  }
-  const groupList = [...groups.values()].sort((a, b) => b.length - a.length).slice(0, 140);
-  const sampleOf = (list) => {
-    const out = [];
-    const step = Math.max(1, Math.floor(list.length / 12));
-    for (let i = 0; i < list.length; i += step) out.push(list[i]);
-    return out;
-  };
-  for (let i = 0; i < groupList.length; i++) {
-    const aSamp = sampleOf(groupList[i]);
-    for (let j = i + 1; j < groupList.length; j++) {
-      const bSamp = sampleOf(groupList[j]);
-      let best = null;
-      for (const a of aSamp) {
-        for (const b of bSamp) {
-          const d = Math.hypot(a.x - b.x, a.z - b.z);
-          if (d > 26) continue;
-          if (!best || d < best.d) best = { a, b, d };
-        }
-      }
-      const big = groupList[i].length > 50 && groupList[j].length > 50;
-      if (best && (best.d < 12 || (big && best.d < 22))) markSeg([best.a.x, best.a.z], [best.b.x, best.b.z], 4.4);
-    }
-  }
-  dilate();
-  const seenEmpty = new Set();
-  const holeDirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-  const maxHole = 1400;
-  const floodHole = (sx, sz) => {
-    const start = `${sx},${sz}`;
-    if (covered.has(start) || seenEmpty.has(start)) return;
-    const x0 = (sx + 0.5) * cell;
-    const z0 = (sz + 0.5) * cell;
-    if (wet(x0, z0) || wall(x0, z0)) return;
-    const q = [[sx, sz]];
-    seenEmpty.add(start);
-    const region = [];
-    let open = false;
-    while (q.length) {
-      const [ix, iz] = q.pop();
-      region.push([ix, iz]);
-      if (region.length > maxHole) {
-        open = true;
-        break;
-      }
-      for (const [dx, dz] of holeDirs) {
-        const nix = ix + dx;
-        const niz = iz + dz;
-        const key = `${nix},${niz}`;
-        if (covered.has(key) || seenEmpty.has(key)) continue;
-        const x = (nix + 0.5) * cell;
-        const z = (niz + 0.5) * cell;
-        if (wet(x, z)) {
-          open = true;
-          continue;
-        }
-        if (wall(x, z)) continue;
-        seenEmpty.add(key);
-        q.push([nix, niz]);
-      }
-    }
-    if (open || region.length > maxHole) return;
-    for (const [ix, iz] of region) mark(ix, iz);
-  };
-  for (const rec of [...covered.values()]) {
-    for (const [dx, dz] of holeDirs) {
-      const ix = rec.ix + dx;
-      const iz = rec.iz + dz;
-      if (covered.has(`${ix},${iz}`)) continue;
-      let n = 0;
-      for (let ox = -1; ox <= 1; ox++) {
-        for (let oz = -1; oz <= 1; oz++) {
-          if (covered.has(`${ix + ox},${iz + oz}`)) n += 1;
-        }
-      }
-      if (n >= 3) floodHole(ix, iz);
-    }
-  }
-  const span = 28;
-  const cols = new Map();
-  const rows = new Map();
-  for (const rec of covered.values()) {
-    if (!cols.has(rec.ix)) cols.set(rec.ix, []);
-    cols.get(rec.ix).push(rec.iz);
-    if (!rows.has(rec.iz)) rows.set(rec.iz, []);
-    rows.get(rec.iz).push(rec.ix);
-  }
-  const fillGaps = (major, lists, alongRow) => {
-    for (const [a, raw] of lists) {
-      const list = raw.slice().sort((x, y) => x - y);
-      for (let i = 1; i < list.length; i++) {
-        const gap = list[i] - list[i - 1];
-        if (gap <= 1 || gap > span + 1) continue;
-        for (let b = list[i - 1] + 1; b < list[i]; b++) {
-          if (alongRow) mark(b, a);
-          else mark(a, b);
-        }
-      }
-    }
-  };
-  fillGaps(0, cols, false);
-  fillGaps(0, rows, true);
-  const shoreKeys = new Set();
-  let shoreFrontier = [];
-  for (const rec of covered.values()) {
-    if (!nearShore(rec.x, rec.z)) continue;
-    const key = `${rec.ix},${rec.iz}`;
-    shoreKeys.add(key);
-    shoreFrontier.push(key);
-  }
-  for (let step = 0; step < 26; step++) {
-    const nextFrontier = [];
-    for (const key of shoreFrontier) {
-      const rec = covered.get(key);
-      if (!rec) continue;
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          if (!dx && !dz) continue;
-          const ix = rec.ix + dx;
-          const iz = rec.iz + dz;
-          const next = `${ix},${iz}`;
-          if (shoreKeys.has(next) || covered.has(next)) {
-            if (covered.has(next) && !shoreKeys.has(next)) {
-              shoreKeys.add(next);
-              nextFrontier.push(next);
-            }
-            continue;
-          }
-          mark(ix, iz);
-          if (covered.has(next)) {
-            shoreKeys.add(next);
-            nextFrontier.push(next);
-          }
-        }
-      }
-    }
-    if (!nextFrontier.length) break;
-    shoreFrontier = nextFrontier;
-  }
-  const hullBin = 32;
-  const hullGroups = new Map();
-  for (const key of shoreKeys) {
-    const rec = covered.get(key);
-    if (!rec) continue;
-    const gk = `${Math.floor(rec.x / hullBin)},${Math.floor(rec.z / hullBin)}`;
-    if (!hullGroups.has(gk)) hullGroups.set(gk, []);
-    hullGroups.get(gk).push(rec);
-  }
-  const cross2 = (o, a, b) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
-  for (const pts of hullGroups.values()) {
-    if (pts.length < 12) continue;
-    const sorted = pts.slice().sort((a, b) => a.x - b.x || a.z - b.z);
-    const lower = [];
-    for (const p of sorted) {
-      while (lower.length >= 2 && cross2(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-      lower.push(p);
-    }
-    const upper = [];
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      const p = sorted[i];
-      while (upper.length >= 2 && cross2(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-      upper.push(p);
-    }
-    lower.pop();
-    upper.pop();
-    const hull = lower.concat(upper);
-    if (hull.length < 3) continue;
-    const ring = hull.map((p) => [p.x, p.z]);
-    ring.push(ring[0]);
-    const b = polygonBounds([ring]);
-    for (let x = b.minX; x <= b.maxX; x += cell) {
-      for (let z = b.minZ; z <= b.maxZ; z += cell) {
-        if (!pointInRing(x, z, ring)) continue;
-        mark(Math.floor(x / cell), Math.floor(z / cell));
-      }
-    }
-  }
-  for (let pass = 0; pass < 3; pass++) {
-    const fill = [];
-    const seen = [...covered.values()];
-    for (const rec of seen) {
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          if (!dx && !dz) continue;
-          const ix = rec.ix + dx;
-          const iz = rec.iz + dz;
-          if (covered.has(`${ix},${iz}`)) continue;
-          let n = 0;
-          for (let ox = -1; ox <= 1; ox++) {
-            for (let oz = -1; oz <= 1; oz++) {
-              if (covered.has(`${ix + ox},${iz + oz}`)) n += 1;
-            }
-          }
-          if (n >= 6) fill.push([ix, iz]);
-        }
-      }
-    }
-    for (const [ix, iz] of fill) mark(ix, iz);
-  }
-  const bin = 8;
-  const bins = new Map();
-  for (const rec of covered.values()) {
-    const key = `${Math.floor(rec.x / bin)},${Math.floor(rec.z / bin)}`;
-    const prev = bins.get(key);
-    if (prev == null || rec.y > prev) bins.set(key, rec.y);
-  }
-  const br = 8;
-  const lifted = new Map();
-  for (const [key, y] of bins) {
-    const comma = key.indexOf(',');
-    const ix = +key.slice(0, comma);
-    const iz = +key.slice(comma + 1);
-    for (let dx = -br; dx <= br; dx++) {
-      for (let dz = -br; dz <= br; dz++) {
-        const nk = `${ix + dx},${iz + dz}`;
-        const prev = lifted.get(nk);
-        if (prev == null || y > prev) lifted.set(nk, y);
-      }
-    }
-  }
-  for (const rec of covered.values()) {
-    const y = lifted.get(`${Math.floor(rec.x / bin)},${Math.floor(rec.z / bin)}`);
-    if (y != null) rec.y = y;
-  }
-  const positions = [];
-  const normals = [];
-  for (const rec of covered.values()) {
-    const right = covered.get(`${rec.ix + 1},${rec.iz}`);
-    const up = covered.get(`${rec.ix},${rec.iz + 1}`);
-    const diag = covered.get(`${rec.ix + 1},${rec.iz + 1}`);
-    if (!right || !up || !diag) continue;
-    const a = [rec.x, rec.y, rec.z];
-    const b = [right.x, right.y, right.z];
-    const c = [diag.x, diag.y, diag.z];
-    const d = [up.x, up.y, up.z];
-    pushRoadTri(positions, normals, a, b, c);
-    pushRoadTri(positions, normals, a, c, d);
-  }
-  if (positions.length) parts.push({ positions, normals });
-  return { disks, covered, cell };
 }
 
 function drapeFlat(flat, sample, lift, parts, blocked, holdBank = false, roadCover = null) {
@@ -1721,7 +1188,6 @@ export async function buildCity(data, projector, hooks = {}) {
   };
   const styledParts = Object.fromEntries(Object.keys(FACADE).map((name) => [name, { walls: [], roofs: [] }]));
   const doorParts = [];
-  const floorParts = [];
   const walkParts = [];
   const asphaltParts = [];
   const waterParts = [];
@@ -1811,42 +1277,34 @@ export async function buildCity(data, projector, hooks = {}) {
       if (pitched) {
         const rise = Math.min(4.6, Math.max(1.6, Math.sqrt(area) * 0.22));
         const hip = pyramidRoof(outer, sample, top, rise);
-        if (hip) roofTarget.push(geometryFromParts([hip]));
+        if (hip) roofTarget.push(hip);
       } else {
         const roof = triangulate(outer, holes, 0, 1);
         if (roof) {
           const p = roof.positions;
           for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + top + 0.35;
-          roofTarget.push(geometryFromParts([roof]));
+          roofTarget.push(roof);
         }
       }
-      const floor = triangulate(outer, holes, 0, 1);
-      if (floor) {
-        const p = floor.positions;
-        for (let i = 0; i < p.length; i += 3) p[i + 1] = sample(p[i], p[i + 2]) + base + 0.05;
-        floorParts.push(floor);
-      }
-      const walls = geometryFromParts(strips);
-      if (walls) {
-        if (styleName) styledParts[styleName].walls.push(walls);
-        else if (taggedWall) extraBucket(extraWalls, taggedWall).push(walls);
-        else {
-          const bucket = rows > 0 ? wallBuckets[wallIndex].windows : wallBuckets[wallIndex].plain;
-          bucket.push(walls);
-        }
-      }
+      const wallTarget = styleName
+        ? styledParts[styleName].walls
+        : taggedWall
+          ? extraBucket(extraWalls, taggedWall)
+          : rows > 0
+            ? wallBuckets[wallIndex].windows
+            : wallBuckets[wallIndex].plain;
+      for (const strip of strips) wallTarget.push(strip);
       const door = doorStrip(outer, sample, base, top, streetEdge(outer, carriageways));
       if (door) doorParts.push(door);
       const closedOuter = outer.concat([outer[0]]);
       const closedHoles = holes.map((hole) => hole.concat([hole[0]]));
       const bounds = polygonBounds([closedOuter, ...closedHoles]);
-      let groundY = Infinity;
-      for (const p of outer) groundY = Math.min(groundY, sample(p[0], p[1]));
+      const [gx, gz] = ringCentroid(outer);
       blockers.push({
         outer: closedOuter,
         holes: closedHoles,
         top,
-        groundY: Number.isFinite(groundY) ? groundY : sample(outer[0][0], outer[0][1]),
+        groundY: sample(gx, gz),
         blocksWalk: true,
         blocksCamera: true,
         ...bounds,
@@ -1867,33 +1325,12 @@ export async function buildCity(data, projector, hooks = {}) {
     });
     if (placed) stats.buildings += 1;
     else stats.skippedBuildings += 1;
-    if (stats.buildings > 0 && stats.buildings % 40 === 0) {
+    if (stats.buildings > 0 && stats.buildings % 400 === 0) {
       await tick('buildings', stats.buildings, (buildings.features || []).length);
     }
   }
 
-  const roadBlocked = queryBlockers(blockers);
   await tick('roads', 1, 1);
-  const asphaltHeights = drapeAsphaltRibbons(
-    roads.centerlines,
-    sample,
-    0.28,
-    asphaltParts,
-    waterTest(water, projector, box, sample),
-    roadBlocked,
-  );
-  const skipWalk = (x, z) => {
-    if (roadBlocked(x, z)) return true;
-    const cover = asphaltHeights?.covered;
-    const rc = asphaltHeights?.cell;
-    if (cover && rc && cover.has(`${Math.floor(x / rc)},${Math.floor(z / rc)}`)) return true;
-    for (const disk of asphaltHeights?.disks || []) {
-      if (Math.hypot(x - disk.x, z - disk.z) < disk.r + 0.8) return true;
-    }
-    const hit = carriageways.query(x, z, 14);
-    return Boolean(hit && hit.dist < (hit.half || 3) + 0.45);
-  };
-  drapeFlat(roads.walk, sample, 0.14, walkParts, skipWalk, false, asphaltHeights);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1915,7 +1352,7 @@ export async function buildCity(data, projector, hooks = {}) {
         const hole = orient(clipPolygon(projectRing(coords[i], projector), ...box), false);
         if (hole) holes.push(hole);
       }
-      const edge = densify(outer.concat([outer[0]]), 8);
+      const edge = densify(outer.concat([outer[0]]), 24);
       const samples = [];
       for (const p of edge) samples.push(sample(p[0], p[1]));
       samples.sort((a, b) => a - b);
@@ -1934,8 +1371,8 @@ export async function buildCity(data, projector, hooks = {}) {
     if (basin.river) basin.y = riverY;
     const holes = basin.holes;
     const flat = triangulate(
-      densify(basin.outer.concat([basin.outer[0]]), 14).slice(0, -1),
-      holes.map((hole) => densify(hole.concat([hole[0]]), 14).slice(0, -1)),
+      densify(basin.outer.concat([basin.outer[0]]), 28).slice(0, -1),
+      holes.map((hole) => densify(hole.concat([hole[0]]), 28).slice(0, -1)),
       basin.y,
       1,
     );
@@ -1982,7 +1419,7 @@ export async function buildCity(data, projector, hooks = {}) {
         best = { area, x, z, y: sample(x, z) + 8 };
       }
         if (!pointInRing(startX, startZ, outer)) {
-        const edge = densify(outer.concat([outer[0]]), 14);
+        const edge = densify(outer.concat([outer[0]]), 32);
         const flat = triangulate(edge.slice(0, -1), [], 0, 1);
         if (flat) parkParts.push(conformSurface(flat, sample, 0.06));
       }
@@ -2052,15 +1489,6 @@ export async function buildCity(data, projector, hooks = {}) {
   const doors = geometryFromParts(doorParts);
   if (doors) {
     group.add(new THREE.Mesh(doors, new THREE.MeshLambertMaterial({ color: 0x7a4e32, side: THREE.DoubleSide })));
-  }
-  const floors = geometryFromParts(floorParts);
-  if (floors) {
-    const floorMesh = new THREE.Mesh(
-      floors,
-      new THREE.MeshLambertMaterial({ color: 0x8d8880, side: THREE.DoubleSide }),
-    );
-    floorMesh.name = 'floors';
-    group.add(floorMesh);
   }
 
   const parks = geometryFromParts(parkParts);
