@@ -837,26 +837,30 @@ export function seatRoadsToDecks(geometry, decks) {
     for (const end of deck.ends) abutments.push(end);
   }
   if (!abutments.length) return;
+  let changed = false;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
-    const y = pos.getY(i);
     const z = pos.getZ(i);
     let nearest = null;
     for (const end of abutments) {
-      const dist = Math.hypot(x - end.x, z - end.z);
+      const dx = x - end.x;
+      const dz = z - end.z;
+      if (dx > 22 || dx < -22 || dz > 22 || dz < -22) continue;
+      const dist = Math.hypot(dx, dz);
       if (dist > 22) continue;
-      const across = Math.abs((x - end.x) * end.nx + (z - end.z) * end.nz);
+      const across = Math.abs(dx * end.nx + dz * end.nz);
       if (across > end.half + 6.5) continue;
+      const y = pos.getY(i);
       if (Math.abs(y - end.y) > 10) continue;
-      if (!nearest || dist < nearest.dist) nearest = { dist, end };
+      if (!nearest || dist < nearest.dist) nearest = { dist, end, y };
     }
     if (!nearest) continue;
     const t = Math.min(1, nearest.dist / 20);
     const ease = (1 - t) * (1 - t);
-    pos.setY(i, nearest.end.y * ease + y * (1 - ease));
+    pos.setY(i, nearest.end.y * ease + nearest.y * (1 - ease));
+    changed = true;
   }
-  pos.needsUpdate = true;
-  geometry.computeVertexNormals();
+  if (changed) pos.needsUpdate = true;
 }
 
 export function punchWaterUnderDecks(geometry, decks, waterY) {
