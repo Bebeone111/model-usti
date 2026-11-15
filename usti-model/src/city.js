@@ -1330,14 +1330,7 @@ export async function buildCity(data, projector, hooks = {}) {
     }
   }
 
-  const roadBlocked = queryBlockers(blockers);
   await tick('roads', 1, 1);
-  const skipWalk = (x, z) => {
-    if (roadBlocked(x, z)) return true;
-    const hit = carriageways.query(x, z, 14);
-    return Boolean(hit && hit.dist < (hit.half || 3) + 0.45);
-  };
-  drapeFlat(roads.walk, sample, 0.14, walkParts, skipWalk);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
