@@ -1058,14 +1058,14 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   return { count: points.length, trunks, canopy };
 }
 
-function surfaceMaterial(texture, fallback, scale, key) {
+function surfaceMaterial(texture, fallback, scale, key, offset = -3) {
   const material = new THREE.MeshBasicMaterial({
     color: texture ? 0xffffff : fallback,
     side: THREE.FrontSide,
     toneMapped: false,
     polygonOffset: true,
-    polygonOffsetFactor: -3,
-    polygonOffsetUnits: -3,
+    polygonOffsetFactor: offset,
+    polygonOffsetUnits: offset,
   });
   if (!texture) return material;
   texture.wrapS = THREE.RepeatWrapping;
@@ -1192,6 +1192,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const doorParts = [];
   const walkParts = [];
   const asphaltParts = [];
+  const paveParts = [];
   const waterParts = [];
   const parkParts = [];
   const blockers = [];
@@ -1337,6 +1338,7 @@ export async function buildCity(data, projector, hooks = {}) {
   const skipSurface = (x, z) => roadBlocked(x, z);
   drapeFlat(roads.asphalt, sample, 0.04, asphaltParts, skipSurface);
   drapeFlat(roads.walk, sample, 0.04, walkParts, skipSurface);
+  drapeFlat(roads.pave, sample, 0.04, paveParts, skipSurface);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1506,18 +1508,25 @@ export async function buildCity(data, projector, hooks = {}) {
     parkMesh.name = 'parks';
     group.add(parkMesh);
   }
+  const plazaMesh = geometryFromParts(paveParts);
+  if (plazaMesh) {
+    const plazaObject = new THREE.Mesh(plazaMesh, surfaceMaterial(data.plazaMap, 0xd4c4a8, 0.12, 'usti-plaza-v1', -2));
+    plazaObject.name = 'plaza';
+    plazaObject.renderOrder = 1;
+    group.add(plazaObject);
+  }
   const walkMesh = geometryFromParts(walkParts);
   if (walkMesh) {
-    const walkObject = new THREE.Mesh(walkMesh, surfaceMaterial(data.paveMap, 0xcfc6b8, 0.22, 'usti-pave-v1'));
+    const walkObject = new THREE.Mesh(walkMesh, surfaceMaterial(data.paveMap, 0xcfc6b8, 0.22, 'usti-walk-v1', -3));
     walkObject.name = 'sidewalk';
-    walkObject.renderOrder = 1;
+    walkObject.renderOrder = 2;
     group.add(walkObject);
   }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    const asphaltMesh = new THREE.Mesh(asphalt, surfaceMaterial(data.asphaltMap, 0x3a414c, 0.16, 'usti-asphalt-v2'));
+    const asphaltMesh = new THREE.Mesh(asphalt, surfaceMaterial(data.asphaltMap, 0x3a414c, 0.16, 'usti-asphalt-v3', -4));
     asphaltMesh.name = 'asphalt';
-    asphaltMesh.renderOrder = 2;
+    asphaltMesh.renderOrder = 3;
     group.add(asphaltMesh);
   }
   const waterMesh = geometryFromParts(waterParts);
@@ -1774,7 +1783,7 @@ export function walkHeight(collision, x, z, ground) {
 }
 
 export function sinkGround() {
-  // Keep the ortho mesh on the DMR. Water is a separate flat plane.
+  // Walk sits on the DMR street envelope. Water is a separate flat plane.
 }
 
 function seatY(x, z, y, collision, basins) {

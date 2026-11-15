@@ -1041,7 +1041,7 @@ function addGround(texture, grid) {
       index = positions.length / 3;
       indexOf.set(key, index);
       positions.push(x, grid.sample(x, z), z);
-      uvs.push(xn, zn);
+      uvs.push(x * 0.14, z * 0.14);
     }
     return index;
   };
@@ -1093,7 +1093,17 @@ function addGround(texture, grid) {
   if (up < 0) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
-  groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
+  if (texture) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  groundMat = new THREE.MeshBasicMaterial({
+    map: texture || null,
+    color: texture ? 0xffffff : 0x5f7a48,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1487,7 +1497,6 @@ async function boot() {
   } catch {
     terrainGrid = parseJson(await fetchBytes('terrain.json', onProgress));
   }
-  const texture = await loadTexture(quality === 'low' ? 'ortho-mobile.jpg' : 'ortho.jpg', onProgress);
   const meta = loaded.meta;
   const sameBox = meta && ['west', 'south', 'east', 'north'].every((key) => Math.abs(area.bbox[key] - meta.bbox[key]) < 1e-6);
   if (!sameBox) {
@@ -1504,9 +1513,11 @@ async function boot() {
     detail = null;
   }
   terrain = makeTerrain(terrainGrid, projector, detail);
-  addGround(texture, terrain);
+  const grassTex = await loadPublicTexture('/textures/grass.jpg');
   const pavingTex = await loadPublicTexture('/textures/paving.jpg');
+  const plazaTex = await loadPublicTexture('/textures/plaza.jpg');
   const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
+  addGround(grassTex, terrain);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1519,6 +1530,7 @@ async function boot() {
       terrain,
       asphaltMap: asphaltTex,
       paveMap: pavingTex,
+      plazaMap: plazaTex,
     },
     projector,
     {
