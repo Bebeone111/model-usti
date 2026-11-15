@@ -175,6 +175,7 @@ let labels = [];
 let bob = 0;
 let gait = 0;
 let groundMat = null;
+const GROUND_REST = new THREE.Color(0x6a6660);
 let waterMat = null;
 let lampMat = null;
 let poiMarks = [];
@@ -1087,7 +1088,7 @@ function addGround(_texture, grid) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
   groundMat = new THREE.MeshBasicMaterial({
-    color: 0x8a8376,
+    color: GROUND_REST,
     side: THREE.DoubleSide,
     toneMapped: false,
   });
@@ -1354,7 +1355,10 @@ function frame(now) {
       const aqi = Number.isFinite(airQuality?.european_aqi) ? ` · AQI ${Math.round(airQuality.european_aqi)}` : '';
       clockEl.textContent = `${skyState.clock}${aqi}`;
       document.querySelector('#menu-clock').textContent = clockEl.textContent;
-      if (groundMat) groundMat.color.setScalar((1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1));
+      if (groundMat) {
+        const shade = (1 - skyState.night * 0.22) * (skyState.wet ? 0.74 : 1);
+        groundMat.color.copy(GROUND_REST).multiplyScalar(shade);
+      }
       if (waterMat) {
         waterMat.opacity = skyState.wet ? 0.86 : 0.72;
         waterMat.color.set(skyState.wet ? 0x123f52 : 0x1a6d88);
