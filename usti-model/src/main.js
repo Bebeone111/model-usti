@@ -154,8 +154,8 @@ let clean = false;
 let helpOpen = false;
 let menuOpen = false;
 let poiOpen = false;
-let realClock = true;
-let hourShift = 0;
+let realClock = !(shotMode && !forceNight);
+let hourShift = shotMode && !forceNight ? -4 : 0;
 const WALK_MIN = 1;
 const WALK_MAX = 16;
 
@@ -1409,6 +1409,12 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
+function loadPublicTexture(url) {
+  return new Promise((resolve) => {
+    new THREE.TextureLoader().load(url, resolve, undefined, () => resolve(null));
+  });
+}
+
 function detailZones(water) {
   const segments = [];
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
@@ -1499,6 +1505,8 @@ async function boot() {
   }
   terrain = makeTerrain(terrainGrid, projector, detail);
   addGround(texture, terrain);
+  const pavingTex = await loadPublicTexture('/textures/paving.jpg');
+  const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1509,6 +1517,8 @@ async function boot() {
       trees: loaded.trees,
       startHint: area.startHint,
       terrain,
+      asphaltMap: asphaltTex,
+      paveMap: pavingTex,
     },
     projector,
     {
@@ -1606,7 +1616,7 @@ async function boot() {
   if (asphalt?.geometry) {
     seatRoadsToDecks(asphalt.geometry, bridges.decks);
   }
-  collision.roadHeight = makeRoadHeightIndex([asphalt?.geometry, quayRibbon?.mesh?.geometry].filter(Boolean));
+  collision.roadHeight = makeRoadHeightIndex([quayRibbon?.mesh?.geometry].filter(Boolean));
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {

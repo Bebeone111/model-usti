@@ -23,12 +23,12 @@ function sideOn(tags, side, key) {
   const specific = tags[`sidewalk:${side}`];
   if (specific != null && specific !== '') {
     const value = String(specific);
-    return value !== 'no' && value !== 'none' && value !== 'separate';
+    return value !== 'no' && value !== 'none';
   }
   if (tags.sidewalk != null && tags.sidewalk !== '') {
     const value = String(tags.sidewalk);
-    if (value === 'no' || value === 'none' || value === 'separate') return false;
-    if (value === 'both' || value === 'yes') return true;
+    if (value === 'no' || value === 'none') return false;
+    if (value === 'both' || value === 'yes' || value === 'separate') return true;
     return value === side;
   }
   return ORDINARY.has(key);
@@ -1000,6 +1000,7 @@ export function buildRoadGeometry(features, projector) {
           roundabout: Boolean(chain.roundabout),
           diskR: chain.diskR || 0,
         });
+        emitRoad(chain, asphalt);
         if (!chain.closed && !chain.roundabout) {
           const walkBefore = walk.length;
           emitSides(chain, walk);
@@ -1007,7 +1008,6 @@ export function buildRoadGeometry(features, projector) {
         }
       }
     } else if (chain.kind === 'pave') {
-      emitRoad(chain, pave);
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
     } else {
       // Independent footways drape as leftover slabs on the hillside.
@@ -1016,8 +1016,8 @@ export function buildRoadGeometry(features, projector) {
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }
   const patches = junctionPatches(segments);
+  asphalt.push(...patches.asphalt);
   walk.push(...patches.walk);
-  pave.push(...patches.pave);
   return {
     asphalt,
     walk,

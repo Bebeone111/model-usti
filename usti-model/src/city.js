@@ -1058,28 +1058,30 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   return { count: points.length, trunks, canopy };
 }
 
-function asphaltMaterial(texture) {
-  const material = new THREE.MeshLambertMaterial({
-    color: texture ? 0xffffff : 0x3a414c,
+function surfaceMaterial(texture, fallback, scale, key) {
+  const material = new THREE.MeshBasicMaterial({
+    color: texture ? 0xffffff : fallback,
     side: THREE.FrontSide,
+    toneMapped: false,
     polygonOffset: true,
-    polygonOffsetFactor: -4,
-    polygonOffsetUnits: -4,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
   });
   if (!texture) return material;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.asphaltMap = { value: texture };
+    shader.uniforms.surfaceMap = { value: texture };
+    shader.uniforms.uScale = { value: scale };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying vec2 vRoadUv;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRoadUv = position.xz * 0.18;');
+      .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nvarying vec2 vSurfUv;')
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\nvSurfUv = position.xz * ${scale.toFixed(3)};`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D asphaltMap;\nvarying vec2 vRoadUv;')
-      .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= texture2D(asphaltMap, vRoadUv).rgb;');
+      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D surfaceMap;\nvarying vec2 vSurfUv;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= texture2D(surfaceMap, vSurfUv).rgb;');
   };
-  material.customProgramCacheKey = () => 'usti-asphalt-v1';
+  material.customProgramCacheKey = () => key;
   return material;
 }
 
@@ -1331,6 +1333,10 @@ export async function buildCity(data, projector, hooks = {}) {
   }
 
   await tick('roads', 1, 1);
+  const roadBlocked = queryBlockers(blockers);
+  const skipSurface = (x, z) => roadBlocked(x, z);
+  drapeFlat(roads.asphalt, sample, 0.04, asphaltParts, skipSurface);
+  drapeFlat(roads.walk, sample, 0.04, walkParts, skipSurface);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1502,23 +1508,16 @@ export async function buildCity(data, projector, hooks = {}) {
   }
   const walkMesh = geometryFromParts(walkParts);
   if (walkMesh) {
-    group.add(
-      new THREE.Mesh(
-        walkMesh,
-        new THREE.MeshLambertMaterial({
-          color: 0xf4ecdf,
-          side: THREE.FrontSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-          polygonOffsetUnits: -1,
-        }),
-      ),
-    );
+    const walkObject = new THREE.Mesh(walkMesh, surfaceMaterial(data.paveMap, 0xcfc6b8, 0.22, 'usti-pave-v1'));
+    walkObject.name = 'sidewalk';
+    walkObject.renderOrder = 1;
+    group.add(walkObject);
   }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    const asphaltMesh = new THREE.Mesh(asphalt, asphaltMaterial(data.asphaltMap));
+    const asphaltMesh = new THREE.Mesh(asphalt, surfaceMaterial(data.asphaltMap, 0x3a414c, 0.16, 'usti-asphalt-v2'));
     asphaltMesh.name = 'asphalt';
+    asphaltMesh.renderOrder = 2;
     group.add(asphaltMesh);
   }
   const waterMesh = geometryFromParts(waterParts);
