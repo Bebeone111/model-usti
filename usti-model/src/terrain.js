@@ -110,6 +110,23 @@ export function makeTerrain(grid, projector, detail = null) {
   const heights = grid.heights;
   const elevMin = grid.elevMin;
   const weights = buildWeight(grid, projector, detail);
+  // DMR 5G includes roofs. Keep the low envelope so streets sit at wall feet, not on a lid.
+  const bare = new Float32Array(width * height);
+  const reach = 2;
+  for (let r = 0; r < height; r++) {
+    for (let c = 0; c < width; c++) {
+      let low = Infinity;
+      for (let dr = -reach; dr <= reach; dr++) {
+        for (let dc = -reach; dc <= reach; dc++) {
+          const rr = Math.min(height - 1, Math.max(0, r + dr));
+          const cc = Math.min(width - 1, Math.max(0, c + dc));
+          const v = heights[rr * width + cc];
+          if (v < low) low = v;
+        }
+      }
+      bare[r * width + c] = low;
+    }
+  }
 
   function locate(x, z) {
     const spanX = projector.maxX - projector.minX || 1;
@@ -131,7 +148,7 @@ export function makeTerrain(grid, projector, detail = null) {
     const r1 = Math.min(height - 1, r0 + 1);
     const tx = col - c0;
     const ty = row - r0;
-    const at = (r, c) => heights[r * width + c];
+    const at = (r, c) => bare[r * width + c];
     const h00 = at(r0, c0);
     const h10 = at(r0, c1);
     const h01 = at(r1, c0);

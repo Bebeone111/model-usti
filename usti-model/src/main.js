@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
-import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight, wrapSeatSample } from './city.js';
+import { addBlocker, buildCity, cameraDistance, makeNameSprite, makeRoadHeightIndex, nightGlow, walkBlocked, walkHeight } from './city.js';
 import { fetchBytes, fileLabel, loadOptionalJson, parseJson } from './load.js';
 import { hudRects, updateLabels } from './labels.js';
 import { collectMapGeometry, createOverview } from './overview.js';
@@ -154,8 +154,8 @@ let clean = false;
 let helpOpen = false;
 let menuOpen = false;
 let poiOpen = false;
-let realClock = true;
-let hourShift = 0;
+let realClock = !(shotMode && !forceNight);
+let hourShift = shotMode && !forceNight ? -4 : 0;
 const WALK_MIN = 1;
 const WALK_MAX = 16;
 
@@ -1041,7 +1041,7 @@ function addGround(texture, grid) {
       index = positions.length / 3;
       indexOf.set(key, index);
       positions.push(x, grid.sample(x, z), z);
-      uvs.push(xn, zn);
+      uvs.push(x * 0.14, z * 0.14);
     }
     return index;
   };
@@ -1093,7 +1093,17 @@ function addGround(texture, grid) {
   if (up < 0) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
-  groundMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
+  if (texture) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  groundMat = new THREE.MeshBasicMaterial({
+    map: texture || null,
+    color: texture ? 0xffffff : 0x5f7a48,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
   const mesh = new THREE.Mesh(geometry, groundMat);
   mesh.name = 'ground';
   mesh.userData.noShadow = true;
@@ -1409,6 +1419,12 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
+function loadPublicTexture(url) {
+  return new Promise((resolve) => {
+    new THREE.TextureLoader().load(url, resolve, undefined, () => resolve(null));
+  });
+}
+
 function detailZones(water) {
   const segments = [];
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
@@ -1481,7 +1497,6 @@ async function boot() {
   } catch {
     terrainGrid = parseJson(await fetchBytes('terrain.json', onProgress));
   }
-  const texture = await loadTexture(quality === 'low' ? 'ortho-mobile.jpg' : 'ortho.jpg', onProgress);
   const meta = loaded.meta;
   const sameBox = meta && ['west', 'south', 'east', 'north'].every((key) => Math.abs(area.bbox[key] - meta.bbox[key]) < 1e-6);
   if (!sameBox) {
@@ -1498,7 +1513,11 @@ async function boot() {
     detail = null;
   }
   terrain = makeTerrain(terrainGrid, projector, detail);
-  addGround(texture, terrain);
+  const grassTex = await loadPublicTexture('/textures/grass.jpg');
+  const pavingTex = await loadPublicTexture('/textures/paving.jpg');
+  const plazaTex = await loadPublicTexture('/textures/plaza.jpg');
+  const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
+  addGround(grassTex, terrain);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1509,6 +1528,9 @@ async function boot() {
       trees: loaded.trees,
       startHint: area.startHint,
       terrain,
+      asphaltMap: asphaltTex,
+      paveMap: pavingTex,
+      plazaMap: plazaTex,
     },
     projector,
     {
@@ -1521,7 +1543,6 @@ async function boot() {
   );
   view.add(city.group);
   collision = city.collision;
-  terrain.sample = wrapSeatSample(terrain.sample.bind(terrain), collision, city.basins);
   const asphalt = city.group.getObjectByName('asphalt');
   const heroHits = addHeroBuildings(view, city.heroes, quality !== 'low');
   for (const hit of heroHits) addBlocker(collision, hit);
@@ -1607,7 +1628,7 @@ async function boot() {
   if (asphalt?.geometry) {
     seatRoadsToDecks(asphalt.geometry, bridges.decks);
   }
-  collision.roadHeight = makeRoadHeightIndex([asphalt?.geometry, quayRibbon?.mesh?.geometry].filter(Boolean));
+  collision.roadHeight = makeRoadHeightIndex([quayRibbon?.mesh?.geometry].filter(Boolean));
   const waterObj = view.getObjectByName('water');
   if (waterObj?.geometry) punchWaterUnderDecks(waterObj.geometry, bridges.decks, city.waterY ?? 0.9);
   cable = addCableCar(view, {

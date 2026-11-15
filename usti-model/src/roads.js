@@ -23,12 +23,12 @@ function sideOn(tags, side, key) {
   const specific = tags[`sidewalk:${side}`];
   if (specific != null && specific !== '') {
     const value = String(specific);
-    return value !== 'no' && value !== 'none' && value !== 'separate';
+    return value !== 'no' && value !== 'none';
   }
   if (tags.sidewalk != null && tags.sidewalk !== '') {
     const value = String(tags.sidewalk);
-    if (value === 'no' || value === 'none' || value === 'separate') return false;
-    if (value === 'both' || value === 'yes') return true;
+    if (value === 'no' || value === 'none') return false;
+    if (value === 'both' || value === 'yes' || value === 'separate') return true;
     return value === side;
   }
   return ORDINARY.has(key);
@@ -67,9 +67,8 @@ function prepareSegments(features, projector) {
     for (let i = 1; i < local.length; i++) full += hypot(local[i - 1], local[i]);
     if (tags.bridge === 'yes' && HERO_BRIDGE.test(String(tags.name || '')) && full > 70) continue;
     let half = (WALK_WIDTH[key] || roadWidth(tags.highway) || 0) / 2;
-    // A long pedestrian way is a square, not a street. The old 34 m ribbon
-    // painted Mírové náměstí as a solid sand field over the orthophoto.
-    if (key === 'pedestrian' && full > 90) half = 3.4;
+    // Long pedestrian ways are squares: a wide plaza strip, not a sidewalk.
+    if (key === 'pedestrian' && full > 90) half = 22;
     if (!(half > 0.15)) continue;
     const roundabout = tags.junction === 'roundabout';
     let left = kind === 'asphalt' && sideOn(tags, 'left', key);
@@ -1000,6 +999,7 @@ export function buildRoadGeometry(features, projector) {
           roundabout: Boolean(chain.roundabout),
           diskR: chain.diskR || 0,
         });
+        emitRoad(chain, asphalt);
         if (!chain.closed && !chain.roundabout) {
           const walkBefore = walk.length;
           emitSides(chain, walk);
@@ -1007,8 +1007,8 @@ export function buildRoadGeometry(features, projector) {
         }
       }
     } else if (chain.kind === 'pave') {
-      emitRoad(chain, pave);
       centerlines.push({ pts: chain.pts, half: chain.half, closed: chain.closed });
+      emitRoad(chain, pave);
     } else {
       // Independent footways drape as leftover slabs on the hillside.
       // Sidewalks stay on emitSides along the carriageway.
@@ -1016,6 +1016,7 @@ export function buildRoadGeometry(features, projector) {
     if (chain.name) labels.push({ name: chain.name, pts: simple.pts });
   }
   const patches = junctionPatches(segments);
+  asphalt.push(...patches.asphalt);
   walk.push(...patches.walk);
   pave.push(...patches.pave);
   return {
