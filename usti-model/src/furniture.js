@@ -157,13 +157,29 @@ export function addStreetFurniture(group, collection, projector, sample, highway
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
-    instanced(stripeGeometry(), new THREE.MeshBasicMaterial({ color: 0xf7f4ee, depthWrite: false }), crossings, (dummy, point) => {
-      dummy.position.set(point.x, point.y + 0.07, point.z);
+  ];
+  const zebra = instanced(
+    stripeGeometry(),
+    new THREE.MeshBasicMaterial({
+      color: 0xf7f4ee,
+      polygonOffset: true,
+      polygonOffsetFactor: -8,
+      polygonOffsetUnits: -8,
+    }),
+    crossings,
+    (dummy, point) => {
+      dummy.position.set(point.x, point.y + 0.1, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, point.scaleZ || 1);
-    }),
-  ].filter(Boolean);
-  for (const mesh of meshes) {
+    },
+  );
+  if (zebra) {
+    zebra.renderOrder = 8;
+    zebra.userData.keepAll = true;
+    meshes.push(zebra);
+  }
+  const placed = meshes.filter(Boolean);
+  for (const mesh of placed) {
     mesh.userData.noShadow = true;
     root.add(mesh);
   }
@@ -182,7 +198,10 @@ export function addStreetFurniture(group, collection, projector, sample, highway
     },
     crossings,
     setDensity(factor) {
-      for (const mesh of meshes) mesh.count = Math.max(0, Math.floor(mesh.userData.fullCount * factor));
+      for (const mesh of placed) {
+        if (mesh.userData.keepAll) continue;
+        mesh.count = Math.max(0, Math.floor(mesh.userData.fullCount * factor));
+      }
     },
   };
 }

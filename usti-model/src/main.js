@@ -999,14 +999,7 @@ function setProgress(ratio, step) {
   statusEl.textContent = step;
 }
 
-function addGround(texture, grid) {
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  const anisotropy = renderer.capabilities.getMaxAnisotropy() || 8;
-  texture.anisotropy = anisotropy;
-  texture.needsUpdate = true;
+function addGround(_texture, grid) {
   const { minX, maxX, minZ, maxZ } = projector;
   const cols = grid.width;
   const rows = grid.height;
@@ -1093,14 +1086,8 @@ function addGround(texture, grid) {
   if (up < 0) {
     for (let i = 0; i < normals.length; i++) normals[i] = -normals[i];
   }
-  if (texture) {
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-  }
   groundMat = new THREE.MeshBasicMaterial({
-    map: texture || null,
-    color: texture ? 0xffffff : 0x5f7a48,
+    color: 0x8a8376,
     side: THREE.DoubleSide,
     toneMapped: false,
   });
@@ -1517,7 +1504,7 @@ async function boot() {
   const pavingTex = await loadPublicTexture('/textures/paving.jpg');
   const plazaTex = await loadPublicTexture('/textures/plaza.jpg');
   const asphaltTex = await loadPublicTexture('/textures/asphalt.jpg');
-  addGround(grassTex, terrain);
+  addGround(null, terrain);
   setProgress(0.78, 'Sestavuji budovy…');
   const city = await buildCity(
     {
@@ -1531,6 +1518,7 @@ async function boot() {
       asphaltMap: asphaltTex,
       paveMap: pavingTex,
       plazaMap: plazaTex,
+      grassMap: grassTex,
     },
     projector,
     {

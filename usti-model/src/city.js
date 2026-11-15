@@ -1501,11 +1501,9 @@ export async function buildCity(data, projector, hooks = {}) {
 
   const parks = geometryFromParts(parkParts);
   if (parks) {
-    const parkMesh = new THREE.Mesh(
-      parks,
-      new THREE.MeshLambertMaterial({ color: 0x63a84a, side: THREE.FrontSide }),
-    );
+    const parkMesh = new THREE.Mesh(parks, surfaceMaterial(data.grassMap, 0x63a84a, 0.18, 'usti-grass-v1', -1));
     parkMesh.name = 'parks';
+    parkMesh.renderOrder = 1;
     group.add(parkMesh);
   }
   const plazaMesh = geometryFromParts(paveParts);
