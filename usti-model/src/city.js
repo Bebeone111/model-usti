@@ -778,22 +778,85 @@ function waterTest(water, projector, box, sample) {
       rings.push({ outer: closed, y: Number.isFinite(y) ? y : 0.9, ...polygonBounds([closed]) });
     });
   }
-  const wet = (x, z) => {
-    for (const r of rings) {
-      if (x < r.minX || x > r.maxX || z < r.minZ || z > r.maxZ) continue;
-      if (!pointInRing(x, z, r.outer)) continue;
-      if (sample(x, z) <= r.y + 0.08) return true;
+  const g = 4;
+  const wetSet = new Set();
+  const shoreSet = new Set();
+  const keyAt = (x, z) => `${Math.floor(x / g)},${Math.floor(z / g)}`;
+  const scanFill = (ring, pred) => {
+    const closed = ring;
+    for (let z = Math.min(...closed.map((p) => p[1])); z <= Math.max(...closed.map((p) => p[1])); z += g) {
+      const xs = [];
+      for (let i = 0; i < closed.length - 1; i++) {
+        const a = closed[i];
+        const b = closed[i + 1];
+        if ((a[1] <= z && b[1] > z) || (b[1] <= z && a[1] > z)) {
+          xs.push(a[0] + ((z - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
+        }
+      }
+      xs.sort((a, b) => a - b);
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        const x0 = xs[i];
+        const x1 = xs[i + 1];
+        for (let x = x0; x <= x1; x += g) {
+          if (!pred || pred(x, z)) wetSet.add(keyAt(x, z));
+        }
+      }
+    }
+  };
+  for (const r of rings) {
+    scanFill(r.outer, (x, z) => sample(x, z) <= r.y + 0.08);
+    const edge = densify(r.outer, 10);
+    const n = Math.ceil(40 / g);
+    const n2 = n * n;
+    for (const p of edge) {
+      const ix = Math.floor(p[0] / g);
+      const iz = Math.floor(p[1] / g);
+      for (let dx = -n; dx <= n; dx++) {
+        for (let dz = -n; dz <= n; dz++) {
+          if (dx * dx + dz * dz <= n2) shoreSet.add(`${ix + dx},${iz + dz}`);
+        }
+      }
+    }
+  }
+  return {
+    wet: (x, z) => wetSet.has(keyAt(x, z)),
+    nearShore: (x, z) => shoreSet.has(keyAt(x, z)),
+  };
+}
+
+function queryBlockers(blockers) {
+  const size = 32;
+  const bins = new Map();
+  for (const block of blockers) {
+    if (!block.blocksWalk || block.kind === 'water') continue;
+    const x0 = Math.floor(block.minX / size);
+    const x1 = Math.floor(block.maxX / size);
+    const z0 = Math.floor(block.minZ / size);
+    const z1 = Math.floor(block.maxZ / size);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iz = z0; iz <= z1; iz++) {
+        const key = `${ix},${iz}`;
+        if (!bins.has(key)) bins.set(key, []);
+        bins.get(key).push(block);
+      }
+    }
+  }
+  return (x, z) => {
+    const list = bins.get(`${Math.floor(x / size)},${Math.floor(z / size)}`);
+    if (!list) return false;
+    for (const block of list) {
+      if (
+        x >= block.minX
+        && x <= block.maxX
+        && z >= block.minZ
+        && z <= block.maxZ
+        && pointInRing(x, z, block.outer)
+      ) {
+        return true;
+      }
     }
     return false;
   };
-  const nearShore = (x, z) => {
-    for (const r of rings) {
-      if (x < r.minX - 40 || x > r.maxX + 40 || z < r.minZ - 40 || z > r.maxZ + 40) continue;
-      if (distToClosedRing(x, z, r.outer) < 40) return true;
-    }
-    return false;
-  };
-  return { wet, nearShore };
 }
 
 function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
@@ -1064,7 +1127,18 @@ function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
     for (const [ix, iz] of region) mark(ix, iz);
   };
   for (const rec of [...covered.values()]) {
-    for (const [dx, dz] of holeDirs) floodHole(rec.ix + dx, rec.iz + dz);
+    for (const [dx, dz] of holeDirs) {
+      const ix = rec.ix + dx;
+      const iz = rec.iz + dz;
+      if (covered.has(`${ix},${iz}`)) continue;
+      let n = 0;
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oz = -1; oz <= 1; oz++) {
+          if (covered.has(`${ix + ox},${iz + oz}`)) n += 1;
+        }
+      }
+      if (n >= 3) floodHole(ix, iz);
+    }
   }
   const span = 28;
   const cols = new Map();
@@ -1091,12 +1165,16 @@ function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
   fillGaps(0, cols, false);
   fillGaps(0, rows, true);
   const shoreKeys = new Set();
+  let shoreFrontier = [];
   for (const rec of covered.values()) {
-    if (nearShore(rec.x, rec.z)) shoreKeys.add(`${rec.ix},${rec.iz}`);
+    if (!nearShore(rec.x, rec.z)) continue;
+    const key = `${rec.ix},${rec.iz}`;
+    shoreKeys.add(key);
+    shoreFrontier.push(key);
   }
   for (let step = 0; step < 26; step++) {
-    const seed = [...shoreKeys];
-    for (const key of seed) {
+    const nextFrontier = [];
+    for (const key of shoreFrontier) {
       const rec = covered.get(key);
       if (!rec) continue;
       for (let dx = -1; dx <= 1; dx++) {
@@ -1105,11 +1183,23 @@ function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
           const ix = rec.ix + dx;
           const iz = rec.iz + dz;
           const next = `${ix},${iz}`;
+          if (shoreKeys.has(next) || covered.has(next)) {
+            if (covered.has(next) && !shoreKeys.has(next)) {
+              shoreKeys.add(next);
+              nextFrontier.push(next);
+            }
+            continue;
+          }
           mark(ix, iz);
-          if (covered.has(next)) shoreKeys.add(next);
+          if (covered.has(next)) {
+            shoreKeys.add(next);
+            nextFrontier.push(next);
+          }
         }
       }
     }
+    if (!nextFrontier.length) break;
+    shoreFrontier = nextFrontier;
   }
   const hullBin = 32;
   const hullGroups = new Map();
@@ -1179,17 +1269,22 @@ function drapeAsphaltRibbons(lines, sample, lift, parts, waterMask, blocked) {
     if (prev == null || rec.y > prev) bins.set(key, rec.y);
   }
   const br = 8;
-  for (const rec of covered.values()) {
-    const ix = Math.floor(rec.x / bin);
-    const iz = Math.floor(rec.z / bin);
-    let high = rec.y;
+  const lifted = new Map();
+  for (const [key, y] of bins) {
+    const comma = key.indexOf(',');
+    const ix = +key.slice(0, comma);
+    const iz = +key.slice(comma + 1);
     for (let dx = -br; dx <= br; dx++) {
       for (let dz = -br; dz <= br; dz++) {
-        const y = bins.get(`${ix + dx},${iz + dz}`);
-        if (y != null && y > high) high = y;
+        const nk = `${ix + dx},${iz + dz}`;
+        const prev = lifted.get(nk);
+        if (prev == null || y > prev) lifted.set(nk, y);
       }
     }
-    rec.y = high;
+  }
+  for (const rec of covered.values()) {
+    const y = lifted.get(`${Math.floor(rec.x / bin)},${Math.floor(rec.z / bin)}`);
+    if (y != null) rec.y = y;
   }
   const positions = [];
   const normals = [];
@@ -1777,17 +1872,8 @@ export async function buildCity(data, projector, hooks = {}) {
     }
   }
 
-  const roadBlocked = (x, z) =>
-    blockers.some(
-      (block) =>
-        block.blocksWalk
-        && block.kind !== 'water'
-        && x >= block.minX
-        && x <= block.maxX
-        && z >= block.minZ
-        && z <= block.maxZ
-        && pointInRing(x, z, block.outer),
-    );
+  const roadBlocked = queryBlockers(blockers);
+  await tick('roads', 1, 1);
   const asphaltHeights = drapeAsphaltRibbons(
     roads.centerlines,
     sample,
@@ -2270,11 +2356,35 @@ function seatY(x, z, y, collision, basins) {
     if (pointInRing(x, z, basin.outer)) return y;
   }
   let seat = y;
-  for (const block of collision?.blockers || []) {
-    if (!block.blocksWalk || block.kind === 'water' || !Number.isFinite(block.groundY)) continue;
-    if (x < block.minX - 16 || x > block.maxX + 16 || z < block.minZ - 16 || z > block.maxZ + 16) continue;
+  const blockers = collision?.blockers;
+  if (!blockers?.length) return seat;
+  const consider = (block) => {
+    if (!block.blocksWalk || block.kind === 'water' || !Number.isFinite(block.groundY)) return;
+    if (x < block.minX - 16 || x > block.maxX + 16 || z < block.minZ - 16 || z > block.maxZ + 16) return;
     if (pointInRing(x, z, block.outer) || distToClosedRing(x, z, block.outer) < 14) {
       seat = Math.max(seat, block.groundY);
+    }
+  };
+  const grid = collision.grid;
+  const cell = collision.cell || 42;
+  if (!grid) {
+    for (const block of blockers) consider(block);
+    return seat;
+  }
+  const seen = new Set();
+  const ix0 = Math.floor((x - 16) / cell);
+  const ix1 = Math.floor((x + 16) / cell);
+  const iz0 = Math.floor((z - 16) / cell);
+  const iz1 = Math.floor((z + 16) / cell);
+  for (let ix = ix0; ix <= ix1; ix++) {
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const list = grid.get(`${ix},${iz}`);
+      if (!list) continue;
+      for (const index of list) {
+        if (seen.has(index)) continue;
+        seen.add(index);
+        consider(blockers[index]);
+      }
     }
   }
   return seat;
