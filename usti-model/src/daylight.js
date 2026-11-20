@@ -139,18 +139,21 @@ export function createDaylight({ hemi, sun, sky, fog, scene, camera }) {
     sun.position.set(player.x + x * 90, player.y + y * 90, player.z + z * 90);
     sun.target.position.set(player.x, player.y, player.z);
     sun.target.updateMatrixWorld();
-    sun.intensity = 0.35 + sunAmt * (wet ? 0.85 : 1.25);
-    hemi.intensity = 0.42 + sunAmt * 0.9;
-    hemi.color.set(sunAmt > 0.45 ? 0xfff3dc : 0x9eb4d2);
+    // High-key midday sun with soft fill — readable streets, short grounded shadows.
+    sun.intensity = 0.28 + sunAmt * (wet ? 0.95 : 1.48);
+    sun.color.set(sunAmt > 0.55 ? 0xfff2d6 : wet ? 0xe8eef4 : 0xffe0b8);
+    hemi.intensity = 0.38 + sunAmt * 0.72;
+    hemi.color.set(sunAmt > 0.45 ? 0xfff1dd : 0x9eb4d2);
+    hemi.groundColor.set(sunAmt > 0.45 ? 0x6f8f5c : 0x3a4658);
     sky.material.uniforms.night.value = night;
     sky.material.uniforms.cloud.value = Math.max(cloud, wet ? 0.72 : 0);
     if (sky.material.uniforms.season) {
       sky.material.uniforms.season.value = seasonNow === 'autumn' ? 0.55 : seasonNow === 'winter' ? 0.25 : seasonNow === 'spring' ? 0.15 : 0;
     }
-    const fogColor = new THREE.Color(wet ? 0xb7c6d0 : 0xc5dff2).lerp(new THREE.Color(0x1a2740), night * 0.82);
+    const fogColor = new THREE.Color(wet ? 0xb8c6d0 : 0xc8dceb).lerp(new THREE.Color(0x1a2740), night * 0.82);
     fog.color.copy(fogColor);
-    fog.near = 700 - cloud * 280 - (wet ? 160 : 0);
-    fog.far = 4400 - cloud * 1200 - night * 900;
+    fog.near = 140 - cloud * 50 - (wet ? 40 : 0);
+    fog.far = 1650 - cloud * 420 - night * 380 - (wet ? 180 : 0);
     sky.position.set(player.x, player.y, player.z);
     const phrase = weatherPhrase(weather?.weather_code);
     const temp = Number.isFinite(weather?.temperature_2m) ? ` · ${Math.round(weather.temperature_2m)} °C` : '';
