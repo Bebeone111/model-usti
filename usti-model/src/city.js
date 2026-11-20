@@ -16,8 +16,9 @@ import {
 import { buildRoadGeometry, makeLineIndex } from './roads.js';
 import { onDeck } from './bridges.js';
 
-const WALLS = [0xf4d2a2, 0xe7b15f, 0xf8e4c8, 0xd9a05a, 0xf0c48c, 0xc98652, 0xedd4ae, 0xe8bc86, 0xf7e0c0, 0xdba56c, 0xf3d0a6, 0xe6c198];
-const ROOFS = [0xd4653a, 0xc4512c, 0xe07040, 0xb8432a, 0xcc5a34, 0xa84830, 0x8d4a3c, 0x5c646c];
+// Muted Central-European plaster: warm beige/sand, less saturated ochre than before.
+const WALLS = [0xe8d7b8, 0xdcc6a0, 0xf0e4d0, 0xc9ae82, 0xe2d0ae, 0xb99672, 0xe8dcc8, 0xd4b892, 0xf2ebe0, 0xc8a87e, 0xe6d4b4, 0xd8c4a4];
+const ROOFS = [0xc45a38, 0xb04830, 0xd06040, 0xa0402c, 0xbc5234, 0x984030, 0x7a463c, 0x5c646c];
 const LANDMARKS = {
   95522479: 'pavel',
   43529959: 'vojtech',
@@ -466,16 +467,23 @@ function facadeOnBeforeCompile(shader) {
       `#include <color_fragment>
       float fx = mod(vFacadeUv.x, 3.05);
       float fy = fract(vFacadeUv.y);
-      float pane = step(0.48, fx) * step(fx, 2.4) * step(0.28, fy) * step(fy, 0.74);
-      float course = step(fy, 0.05);
-      vec3 glass = vec3(0.18, 0.22, 0.26);
-      diffuseColor.rgb = mix(diffuseColor.rgb, glass, pane * 0.72);
-      diffuseColor.rgb *= mix(1.0, 0.8, course);
+      // Darker recessed panes + light frame for street-level facade depth.
+      float pane = step(0.52, fx) * step(fx, 2.36) * step(0.30, fy) * step(fy, 0.72);
+      float frame = step(0.42, fx) * step(fx, 2.46) * step(0.24, fy) * step(fy, 0.78) * (1.0 - pane);
+      float course = step(fy, 0.045);
+      float grain = fract(sin(dot(floor(vFacadeUv * vec2(7.0, 11.0)), vec2(12.9898, 78.233))) * 43758.5453);
+      vec3 plaster = diffuseColor.rgb * (0.94 + grain * 0.08);
+      vec3 glass = vec3(0.12, 0.15, 0.18);
+      plaster = mix(plaster, glass, pane * 0.88);
+      plaster = mix(plaster, plaster * vec3(0.86, 0.84, 0.80), frame);
+      plaster *= mix(1.0, 0.78, course);
       float cornice = step(0.9, fy);
-      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.62), cornice);
+      plaster = mix(plaster, plaster * vec3(0.74, 0.70, 0.64), cornice);
+      float baseBand = 1.0 - smoothstep(0.0, 0.14, fy);
+      plaster *= mix(1.0, 0.86, baseBand);
       float id = floor(vFacadeUv.x / 3.05) * 17.0 + floor(vFacadeUv.y * 9.0);
       float lit = step(0.5, fract(sin(id * 127.13) * 43758.5453));
-      diffuseColor.rgb += vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * 3.4;`,
+      diffuseColor.rgb = plaster + vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * 3.4;`,
     );
 }
 
@@ -535,7 +543,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v6-amber';
+  material.customProgramCacheKey = () => 'usti-facade-v7-town';
   return material;
 }
 
@@ -599,7 +607,7 @@ function styledFacade(style, name) {
         diffuseColor.rgb = tone + vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * uGlow * 2.8;`,
       );
   };
-  material.customProgramCacheKey = () => `usti-landmark-${name}-amber`;
+  material.customProgramCacheKey = () => `usti-landmark-${name}-town`;
   return material;
 }
 
@@ -1017,7 +1025,8 @@ function addTrees(group, data, projector, sample, roads, blockers) {
     if (feature.properties?.landuse === 'forest') scatterArea(feature, 11);
   }
   if (!points.length) return { count: 0, trunks: null, canopy: null };
-  const greens = [0x2e6b34, 0x3d7c3c, 0x4d8c42, 0x255e30, 0x5a9346];
+  // Slightly richer greens against muted plaster (town-skyline contrast).
+  const greens = [0x2f7a38, 0x3f8c40, 0x529646, 0x267034, 0x5fa04c];
   const trunks = new THREE.InstancedMesh(
     new THREE.CylinderGeometry(0.1, 0.16, 1, 5).translate(0, 0.5, 0),
     new THREE.MeshLambertMaterial({ color: 0x6a4b32 }),
@@ -1059,10 +1068,10 @@ function addTrees(group, data, projector, sample, roads, blockers) {
 }
 
 function surfaceMaterial(texture, fallback, scale, key, offset = -3) {
-  const material = new THREE.MeshBasicMaterial({
+  // Lambert so asphalt/walk receive sun + soft shadows (MeshBasic stayed unlit).
+  const material = new THREE.MeshLambertMaterial({
     color: texture ? 0xffffff : fallback,
     side: THREE.FrontSide,
-    toneMapped: false,
     polygonOffset: true,
     polygonOffsetFactor: offset,
     polygonOffsetUnits: offset,
@@ -1081,7 +1090,7 @@ function surfaceMaterial(texture, fallback, scale, key, offset = -3) {
       .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D surfaceMap;\nvarying vec2 vSurfUv;')
       .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= texture2D(surfaceMap, vSurfUv).rgb;');
   };
-  material.customProgramCacheKey = () => key;
+  material.customProgramCacheKey = () => `${key}-lit`;
   return material;
 }
 
@@ -1501,28 +1510,28 @@ export async function buildCity(data, projector, hooks = {}) {
 
   const parks = geometryFromParts(parkParts);
   if (parks) {
-    const parkMesh = new THREE.Mesh(parks, surfaceMaterial(data.grassMap, 0x63a84a, 0.18, 'usti-grass-v1', -1));
+    const parkMesh = new THREE.Mesh(parks, surfaceMaterial(data.grassMap, 0x5ea046, 0.18, 'usti-grass-v2', -1));
     parkMesh.name = 'parks';
     parkMesh.renderOrder = 1;
     group.add(parkMesh);
   }
   const plazaMesh = geometryFromParts(paveParts);
   if (plazaMesh) {
-    const plazaObject = new THREE.Mesh(plazaMesh, surfaceMaterial(data.plazaMap, 0xd4c4a8, 0.12, 'usti-plaza-v1', -2));
+    const plazaObject = new THREE.Mesh(plazaMesh, surfaceMaterial(data.plazaMap, 0xd6c8b0, 0.12, 'usti-plaza-v2', -2));
     plazaObject.name = 'plaza';
     plazaObject.renderOrder = 1;
     group.add(plazaObject);
   }
   const walkMesh = geometryFromParts(walkParts);
   if (walkMesh) {
-    const walkObject = new THREE.Mesh(walkMesh, surfaceMaterial(data.paveMap, 0xcfc6b8, 0.22, 'usti-walk-v1', -3));
+    const walkObject = new THREE.Mesh(walkMesh, surfaceMaterial(data.paveMap, 0xd0c8bc, 0.22, 'usti-walk-v2', -3));
     walkObject.name = 'sidewalk';
     walkObject.renderOrder = 2;
     group.add(walkObject);
   }
   const asphalt = geometryFromParts(asphaltParts);
   if (asphalt) {
-    const asphaltMesh = new THREE.Mesh(asphalt, surfaceMaterial(data.asphaltMap, 0x3a414c, 0.16, 'usti-asphalt-v3', -4));
+    const asphaltMesh = new THREE.Mesh(asphalt, surfaceMaterial(data.asphaltMap, 0x3e4650, 0.16, 'usti-asphalt-v4', -4));
     asphaltMesh.name = 'asphalt';
     asphaltMesh.renderOrder = 3;
     group.add(asphaltMesh);

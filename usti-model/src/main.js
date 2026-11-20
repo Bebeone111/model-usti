@@ -34,7 +34,8 @@ coarseQuery.addEventListener('change', () => {
 
 const PRESETS = {
   low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false, lamps: false },
-  medium: { dpr: 1.45, shadows: false, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true },
+  // Soft shadows on medium match the street-grounded look of modest browser city worlds.
+  medium: { dpr: 1.45, shadows: true, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true },
   high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true, lamps: true },
 };
 const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
@@ -70,18 +71,22 @@ if (!renderer) {
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PRESETS[quality].dpr));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.setClearColor(0x8ec4ee, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+renderer.setClearColor(0xb9d4ea, 1);
 renderer.shadowMap.enabled = false;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xc5dff2, 980, 4400);
-const hemi = new THREE.HemisphereLight(0xfff3dc, 0x7c9a62, 1.28);
+// Street-scale haze: distant blocks soften without hiding the whole centrum.
+scene.fog = new THREE.Fog(0xc8dceb, 140, 1650);
+const hemi = new THREE.HemisphereLight(0xfff1dd, 0x6f8f5c, 1.05);
 scene.add(hemi);
 const view = new THREE.Group();
 view.name = 'view';
 view.scale.x = -1;
 scene.add(view);
-const sun = new THREE.DirectionalLight(0xfff0cc, 1.55);
+const sun = new THREE.DirectionalLight(0xfff2d6, 1.72);
 sun.position.set(460, 780, 240);
 view.add(sun);
 
@@ -91,9 +96,11 @@ const sky = new THREE.Mesh(
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
+    toneMapped: false,
     uniforms: {
-      top: { value: new THREE.Color(0x3d9adf) },
-      horizon: { value: new THREE.Color(0xf3d3a8) },
+      // Pale midday blue with bleached horizon — readable, not postcard-saturated.
+      top: { value: new THREE.Color(0x6aa8d4) },
+      horizon: { value: new THREE.Color(0xe8eef4) },
       cloud: { value: 0 },
       night: { value: 0 },
       season: { value: 0 },
@@ -119,11 +126,14 @@ const sky = new THREE.Mesh(
       void main() {
         vec3 n = normalize(vPos);
         float h = n.y;
-        float t = smoothstep(-0.05, 0.45, h);
+        // Stronger horizon bleach so far streets melt into haze like a town skyline.
+        float t = smoothstep(-0.02, 0.55, h);
+        float haze = 1.0 - smoothstep(0.0, 0.22, h);
         vec3 day = mix(horizon, top, t);
-        float veil = 0.78 + 0.08 * n.y;
-        vec3 overcast = vec3(0.70, 0.74, 0.78) * veil;
-        day = mix(day, overcast, cloud * (1.0 - t * 0.35));
+        day = mix(day, horizon * 1.02, haze * 0.55);
+        float veil = 0.82 + 0.08 * n.y;
+        vec3 overcast = vec3(0.72, 0.76, 0.80) * veil;
+        day = mix(day, overcast, cloud * (1.0 - t * 0.28));
         vec3 dusk = mix(vec3(0.07, 0.11, 0.2), vec3(0.18, 0.08, 0.05), season);
         vec3 color = mix(day, dusk, night);
         float star = step(0.992, ign(n.xz * 80.0)) * night * (1.0 - cloud);
@@ -798,20 +808,24 @@ function applyQuality(level) {
   renderer.shadowMap.enabled = preset.shadows;
   sun.castShadow = preset.shadows;
   if (preset.shadows) {
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.bias = -0.001;
+    const mapSize = quality === 'high' ? 2048 : 1024;
+    sun.shadow.mapSize.set(mapSize, mapSize);
+    sun.shadow.bias = -0.0008;
+    sun.shadow.normalBias = 0.04;
     const shadowCam = sun.shadow.camera;
-    shadowCam.left = -70;
-    shadowCam.right = 70;
-    shadowCam.top = 70;
-    shadowCam.bottom = -70;
+    shadowCam.left = -90;
+    shadowCam.right = 90;
+    shadowCam.top = 90;
+    shadowCam.bottom = -90;
     shadowCam.near = 4;
-    shadowCam.far = 220;
+    shadowCam.far = 260;
     shadowCam.updateProjectionMatrix();
   }
   view.traverse((obj) => {
     if (!obj.isMesh) return;
-    obj.castShadow = preset.shadows && !obj.isInstancedMesh && !obj.userData.noShadow && obj.name !== 'ground';
+    const street = obj.name === 'asphalt' || obj.name === 'sidewalk' || obj.name === 'plaza' || obj.name === 'parks';
+    // Instanced trees/furniture cast too — street shadows are the main grounding cue.
+    obj.castShadow = preset.shadows && !obj.userData.noShadow && obj.name !== 'ground' && !street;
     obj.receiveShadow = preset.shadows && !obj.userData.noShadow;
   });
   if (api.trees?.trunks) api.trees.trunks.count = Math.max(0, Math.floor(api.trees.trunks.userData.fullCount * preset.trees));
@@ -1737,14 +1751,25 @@ async function boot() {
   refreshVisited();
   if (wantPlay) reveal();
   if (shotMode && !wantPlay) beginPlay(false);
+  // Shot mode defaults to a clear midday sample so atmosphere screenshots stay readable
+  // (live Open-Meteo rain/overcast washes sky + kills ground shadows). Use &wet to keep live wet.
+  if (shotMode && !shotParams.has('wet')) {
+    weather = {
+      temperature_2m: 18,
+      weather_code: 1,
+      cloud_cover: 18,
+      rain: 0,
+      wind_speed_10m: 4,
+    };
+  }
   fetchWeather()
     .then((current) => {
-      weather = current;
+      if (!(shotMode && !shotParams.has('wet'))) weather = current;
       document.querySelector('#weather-credit').hidden = false;
       clockEl.title = 'Weather data by Open-Meteo.com (CC BY 4.0)';
     })
     .catch(() => {
-      weather = null;
+      if (!(shotMode && !shotParams.has('wet'))) weather = null;
     });
   fetchAirQuality()
     .then((air) => {
