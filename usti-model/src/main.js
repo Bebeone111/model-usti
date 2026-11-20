@@ -1,5 +1,10 @@
 import './style.css';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import area from '../area.config.json';
 import { clipPolyline, makeProjector } from './geom.js';
 import { makeTerrain, terrainDetailFromBin, terrainFromBin } from './terrain.js';
@@ -33,10 +38,10 @@ coarseQuery.addEventListener('change', () => {
 });
 
 const PRESETS = {
-  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false, lamps: false },
+  low: { dpr: 1, shadows: false, labels: 170, trees: 0.45, furniture: 0.55, rain: false, lamps: false, fxaa: false },
   // Soft shadows on medium match the street-grounded look of modest browser city worlds.
-  medium: { dpr: 1.45, shadows: true, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true },
-  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true, lamps: true },
+  medium: { dpr: 1.45, shadows: true, labels: 260, trees: 0.8, furniture: 1, rain: false, lamps: true, fxaa: true },
+  high: { dpr: 1.75, shadows: true, labels: 360, trees: 1, furniture: 1, rain: true, lamps: true, fxaa: true },
 };
 const weak = (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
 const shotParams = new URLSearchParams(location.search);
@@ -233,11 +238,42 @@ const api = {
 };
 if (import.meta.env.DEV) window.__usti = api;
 
+let composer = null;
+let fxaaPass = null;
+
+function resizeComposer() {
+  if (!composer) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const pr = renderer.getPixelRatio();
+  composer.setSize(w, h);
+  if (fxaaPass) fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+}
+
+function setupComposer(enabled) {
+  if (!enabled) {
+    composer = null;
+    fxaaPass = null;
+    return;
+  }
+  if (composer) {
+    resizeComposer();
+    return;
+  }
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  fxaaPass = new ShaderPass(FXAAShader);
+  composer.addPass(fxaaPass);
+  composer.addPass(new OutputPass());
+  resizeComposer();
+}
+
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PRESETS[quality].dpr));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  resizeComposer();
 }
 window.addEventListener('resize', resize);
 
@@ -823,15 +859,18 @@ function applyQuality(level) {
   }
   view.traverse((obj) => {
     if (!obj.isMesh) return;
-    const street = obj.name === 'asphalt' || obj.name === 'sidewalk' || obj.name === 'plaza' || obj.name === 'parks';
+    const street = obj.name === 'asphalt' || obj.name === 'sidewalk' || obj.name === 'plaza' || obj.name === 'parks'
+      || obj.name === 'curb' || obj.name === 'markings';
     // Instanced trees/furniture cast too — street shadows are the main grounding cue.
     obj.castShadow = preset.shadows && !obj.userData.noShadow && obj.name !== 'ground' && !street;
     obj.receiveShadow = preset.shadows && !obj.userData.noShadow;
   });
   if (api.trees?.trunks) api.trees.trunks.count = Math.max(0, Math.floor(api.trees.trunks.userData.fullCount * preset.trees));
   if (api.trees?.canopy) api.trees.canopy.count = Math.max(0, Math.floor(api.trees.canopy.userData.fullCount * preset.trees));
+  if (api.trees?.rings) api.trees.rings.count = Math.max(0, Math.floor(api.trees.rings.userData.fullCount * preset.trees));
   furniture?.setDensity(preset.furniture);
   trolleys?.setEnabled(quality !== 'low');
+  setupComposer(preset.fxaa);
   const select = document.querySelector('#quality');
   if (select) select.value = quality;
   resize();
@@ -1310,9 +1349,12 @@ function updateLampLights(night) {
       entry.glow.visible = false;
       return;
     }
-    entry.light.position.set(hit.lamp.x, hit.lamp.y + 4.2, hit.lamp.z);
+    const yaw = hit.lamp.rot || 0;
+    const armX = Math.sin(yaw) * 0.55;
+    const armZ = Math.cos(yaw) * 0.55;
+    entry.light.position.set(hit.lamp.x + armX, hit.lamp.y + 4.2, hit.lamp.z + armZ);
     entry.light.intensity = 5.2 * strength;
-    entry.glow.position.set(hit.lamp.x, hit.lamp.y + 0.2, hit.lamp.z);
+    entry.glow.position.set(hit.lamp.x + armX, hit.lamp.y + 0.2, hit.lamp.z + armZ);
     entry.glow.visible = true;
   });
   if (lampLights[0]) lampLights[0].glowMat.opacity = 0.22 * strength;
@@ -1421,7 +1463,8 @@ function frame(now) {
     if (overview.isOpen()) overview.drawMap();
   }
   if (playing) refreshWalkHud(now || performance.now());
-  renderer.render(scene, camera);
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
 }
 
 function loadPublicTexture(url) {
@@ -1613,7 +1656,14 @@ async function boot() {
   goalMark.visible = false;
   goalMark.userData.noShadow = true;
   view.add(goalMark);
-  furniture = addStreetFurniture(view, loaded.furniture, projector, terrain.sample.bind(terrain), loaded.highways);
+  furniture = addStreetFurniture(
+    view,
+    loaded.furniture,
+    projector,
+    terrain.sample.bind(terrain),
+    loaded.highways,
+    loaded.landuse,
+  );
   const jedno = addJednoUstiMark(view, projector, terrain.sample.bind(terrain), loaded.buildings);
   if (jedno) api.jednoUsti = jedno.userData.shot;
   lampMat = furniture.lampMat;
