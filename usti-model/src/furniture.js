@@ -77,12 +77,40 @@ function stripeGeometry() {
   return mergeGeometries(pieces, false);
 }
 
-export function addStreetFurniture(group, collection, projector, sample, highways = null) {
+function carGeometry() {
+  const body = new THREE.BoxGeometry(1.7, 0.55, 4.1);
+  body.translate(0, 0.55, 0);
+  const cabin = new THREE.BoxGeometry(1.5, 0.48, 2.1);
+  cabin.translate(0, 1.05, -0.15);
+  return mergeGeometries([body, cabin], false);
+}
+
+function fenceGeometry() {
+  const rail = new THREE.BoxGeometry(2.2, 0.06, 0.05);
+  rail.translate(0, 0.85, 0);
+  const rail2 = new THREE.BoxGeometry(2.2, 0.06, 0.05);
+  rail2.translate(0, 0.45, 0);
+  const post = new THREE.BoxGeometry(0.06, 1.05, 0.06);
+  post.translate(0, 0.52, 0);
+  return mergeGeometries([rail, rail2, post], false);
+}
+
+function lampArmGeometry() {
+  const pole = new THREE.CylinderGeometry(0.055, 0.08, 4.4, 6);
+  pole.translate(0, 2.2, 0);
+  const arm = new THREE.BoxGeometry(0.08, 0.08, 0.85);
+  arm.translate(0, 4.25, 0.35);
+  return mergeGeometries([pole, arm], false);
+}
+
+export function addStreetFurniture(group, collection, projector, sample, highways = null, landuse = null) {
   const benches = [];
   const lamps = [];
   const stops = [];
   const bins = [];
   const crossings = [];
+  const cars = [];
+  const fences = [];
   const roads = carriageSegs(highways, projector);
   let missedCrossings = 0;
   for (const feature of collection?.features || []) {
@@ -120,6 +148,91 @@ export function addStreetFurniture(group, collection, projector, sample, highway
       lamps.push({ x: square[0] + dx, z: square[1] + dz, y: sample(square[0] + dx, square[1] + dz), rot: 0, name: '' });
     }
   }
+  // Fill sparse OSM lamps: rhythmic poles along carriageways (~32 m).
+  const lampClaim = new Set();
+  const claimLamp = (x, z) => {
+    const key = `${Math.round(x / 14)},${Math.round(z / 14)}`;
+    if (lampClaim.has(key)) return false;
+    lampClaim.add(key);
+    return true;
+  };
+  for (const lamp of lamps) claimLamp(lamp.x, lamp.z);
+  for (const seg of roads) {
+    if (seg.width < 4.5) continue;
+    const len = seg.len;
+    const tx = seg.dx / len;
+    const tz = seg.dz / len;
+    const nx = -tz;
+    const nz = tx;
+    for (let d = 8; d < len - 6; d += 26) {
+      if (unit(seg.ax + tx * d, seg.az + tz * d, 21) > 0.72) continue;
+      const side = unit(seg.ax + d, seg.az, 22) > 0.5 ? 1 : -1;
+      const x = seg.ax + tx * d + nx * (seg.width * 0.5 + 0.55) * side;
+      const z = seg.az + tz * d + nz * (seg.width * 0.5 + 0.55) * side;
+      if (!inside(projector, x, z) || !claimLamp(x, z)) continue;
+      lamps.push({ x, z, y: sample(x, z), rot: Math.atan2(tx, tz), name: '' });
+    }
+  }
+  // Sparse parked cars as set dressing only (not traffic).
+  const carClaim = new Set();
+  for (const seg of roads) {
+    if (seg.width < 5 || seg.len < 14) continue;
+    const len = seg.len;
+    const tx = seg.dx / len;
+    const tz = seg.dz / len;
+    const nx = -tz;
+    const nz = tx;
+    for (let d = 8; d < len - 6; d += 20) {
+      if (unit(seg.ax + tx * d, seg.az + tz * d, 31) > 0.55) continue;
+      const side = unit(seg.ax + d, seg.az, 32) > 0.5 ? 1 : -1;
+      const x = seg.ax + tx * d + nx * (seg.width * 0.5 - 1.15) * side;
+      const z = seg.az + tz * d + nz * (seg.width * 0.5 - 1.15) * side;
+      if (!inside(projector, x, z)) continue;
+      const key = `${Math.round(x / 10)},${Math.round(z / 10)}`;
+      if (carClaim.has(key)) continue;
+      carClaim.add(key);
+      cars.push({
+        x,
+        z,
+        y: sample(x, z),
+        rot: Math.atan2(tx, tz) + (side < 0 ? Math.PI : 0),
+        tint: unit(x, z, 33),
+      });
+    }
+  }
+  // Simple fences along park / recreation edges.
+  const parkish = new Set(['park', 'garden', 'recreation_ground', 'village_green', 'cemetery']);
+  for (const feature of landuse?.features || []) {
+    const tags = feature.properties || {};
+    if (!parkish.has(tags.landuse) && tags.leisure !== 'park') continue;
+    const rings = feature.geometry?.type === 'Polygon'
+      ? [feature.geometry.coordinates[0]]
+      : feature.geometry?.type === 'MultiPolygon'
+        ? feature.geometry.coordinates.map((poly) => poly[0])
+        : [];
+    for (const ring of rings) {
+      if (!ring || ring.length < 4) continue;
+      const local = ring.map(([lon, lat]) => projector.toLocal(lon, lat));
+      for (let i = 0; i < local.length - 1; i++) {
+        const a = local[i];
+        const b = local[i + 1];
+        const dx = b[0] - a[0];
+        const dz = b[1] - a[1];
+        const len = Math.hypot(dx, dz);
+        if (len < 3.5 || len > 48) continue;
+        if (unit(a[0], a[1], 41) > 0.72) continue;
+        const step = 2.4;
+        const tx = dx / len;
+        const tz = dz / len;
+        for (let d = 0.6; d < len - 0.4; d += step) {
+          const x = a[0] + tx * d;
+          const z = a[1] + tz * d;
+          if (!inside(projector, x, z)) continue;
+          fences.push({ x, z, y: sample(x, z), rot: Math.atan2(tx, tz) });
+        }
+      }
+    }
+  }
   const root = new THREE.Group();
   root.name = 'furniture';
   const lampMat = new THREE.MeshLambertMaterial({ color: 0xf4e2a8, emissive: 0xffc56a, emissiveIntensity: 0.35 });
@@ -131,20 +244,21 @@ export function addStreetFurniture(group, collection, projector, sample, highway
   stopGeo.translate(0, 1.7, 0);
   const stopCap = new THREE.BoxGeometry(1.15, 0.08, 0.7);
   stopCap.translate(0, 3.2, 0.2);
+  const carColors = [0xd8dde2, 0x3a4048, 0x8a3030, 0x2f5f8f, 0xcfc6b0, 0x4a5540];
   const meshes = [
     instanced(mergeGeometries([benchGeo, backGeo]), new THREE.MeshLambertMaterial({ color: 0x6d4c34 }), benches, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
       dummy.rotation.set(0, point.rot, 0);
       dummy.scale.set(1, 1, 1);
     }),
-    instanced(new THREE.CylinderGeometry(0.06, 0.08, 4.2, 6).translate(0, 2.1, 0), new THREE.MeshLambertMaterial({ color: 0x3c4450 }), lamps, (dummy, point) => {
+    instanced(lampArmGeometry(), new THREE.MeshLambertMaterial({ color: 0x3c4450 }), lamps, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
-      dummy.rotation.set(0, 0, 0);
+      dummy.rotation.set(0, point.rot || 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
-    instanced(new THREE.SphereGeometry(0.22, 8, 6).translate(0, 4.25, 0), lampMat, lamps, (dummy, point) => {
+    instanced(new THREE.SphereGeometry(0.18, 8, 6).translate(0, 4.2, 0.55), lampMat, lamps, (dummy, point) => {
       dummy.position.set(point.x, point.y, point.z);
-      dummy.rotation.set(0, 0, 0);
+      dummy.rotation.set(0, point.rot || 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
     instanced(mergeGeometries([stopGeo, stopCap]), new THREE.MeshLambertMaterial({ color: 0xe2b23a, emissive: 0x6a4a10, emissiveIntensity: 0.25 }), stops, (dummy, point) => {
@@ -157,7 +271,26 @@ export function addStreetFurniture(group, collection, projector, sample, highway
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
     }),
+    instanced(fenceGeometry(), new THREE.MeshLambertMaterial({ color: 0x2a2e34 }), fences, (dummy, point) => {
+      dummy.position.set(point.x, point.y, point.z);
+      dummy.rotation.set(0, point.rot, 0);
+      dummy.scale.set(1, 1, 1);
+    }),
   ];
+  const carMesh = instanced(carGeometry(), new THREE.MeshLambertMaterial({ color: 0xffffff }), cars, (dummy, point) => {
+    dummy.position.set(point.x, point.y, point.z);
+    dummy.rotation.set(0, point.rot, 0);
+    dummy.scale.set(1, 1, 1);
+  });
+  if (carMesh) {
+    const color = new THREE.Color();
+    cars.forEach((point, index) => {
+      color.setHex(carColors[Math.floor(point.tint * carColors.length) % carColors.length]);
+      carMesh.setColorAt(index, color);
+    });
+    if (carMesh.instanceColor) carMesh.instanceColor.needsUpdate = true;
+    meshes.push(carMesh);
+  }
   const zebra = instanced(
     stripeGeometry(),
     new THREE.MeshBasicMaterial({
@@ -180,7 +313,7 @@ export function addStreetFurniture(group, collection, projector, sample, highway
   }
   const placed = meshes.filter(Boolean);
   for (const mesh of placed) {
-    mesh.userData.noShadow = true;
+    mesh.userData.noShadow = mesh === zebra;
     root.add(mesh);
   }
   if (meshes.length) group.add(root);
@@ -195,6 +328,8 @@ export function addStreetFurniture(group, collection, projector, sample, highway
       bin: bins.length,
       crossing: crossings.length,
       crossingMissed: missedCrossings,
+      car: cars.length,
+      fence: fences.length,
     },
     crossings,
     setDensity(factor) {

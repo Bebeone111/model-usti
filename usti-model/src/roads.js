@@ -564,6 +564,120 @@ function emitRoad(chain, bucket) {
   }
 }
 
+function pushFlatQuad(bucket, ax, az, bx, bz, cx, cz, dx, dz) {
+  bucket.push(ax, az, bx, bz, cx, cz, ax, az, cx, cz, dx, dz);
+}
+
+function emitLaneStrip(pts, halfAt, closed, offset, width, bucket) {
+  const n = pts.length;
+  const spans = closed ? n : n - 1;
+  for (let i = 0; i < spans; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 0.35) continue;
+    const nx = -dz / len;
+    const nz = dx / len;
+    const ha = halfAt(i);
+    const hb = halfAt((i + 1) % n);
+    const offA = typeof offset === 'function' ? offset(i, ha) : offset;
+    const offB = typeof offset === 'function' ? offset((i + 1) % n, hb) : offset;
+    const hw = width * 0.5;
+    const a0x = a[0] + nx * (offA - hw);
+    const a0z = a[1] + nz * (offA - hw);
+    const a1x = a[0] + nx * (offA + hw);
+    const a1z = a[1] + nz * (offA + hw);
+    const b0x = b[0] + nx * (offB - hw);
+    const b0z = b[1] + nz * (offB - hw);
+    const b1x = b[0] + nx * (offB + hw);
+    const b1z = b[1] + nz * (offB + hw);
+    pushFlatQuad(bucket, a0x, a0z, b0x, b0z, b1x, b1z, a1x, a1z);
+  }
+}
+
+function emitDashedCenter(pts, halfAt, closed, bucket) {
+  const n = pts.length;
+  const spans = closed ? n : n - 1;
+  let carry = 0;
+  const dash = 2.4;
+  const gap = 2.8;
+  const period = dash + gap;
+  for (let i = 0; i < spans; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 0.4) continue;
+    const tx = dx / len;
+    const tz = dz / len;
+    const nx = -tz;
+    const nz = tx;
+    const ha = halfAt(i);
+    const hb = halfAt((i + 1) % n);
+    if ((ha + hb) * 0.5 < 3.15) {
+      carry = 0;
+      continue;
+    }
+    let dist = 0;
+    while (dist < len) {
+      const phase = (carry + dist) % period;
+      if (phase < dash) {
+        const run = Math.min(dash - phase, len - dist);
+        const t0 = dist / len;
+        const t1 = (dist + run) / len;
+        const ax = a[0] + dx * t0;
+        const az = a[1] + dz * t0;
+        const bx = a[0] + dx * t1;
+        const bz = a[1] + dz * t1;
+        const hw = 0.09;
+        pushFlatQuad(
+          bucket,
+          ax + nx * -hw,
+          az + nz * -hw,
+          bx + nx * -hw,
+          bz + nz * -hw,
+          bx + nx * hw,
+          bz + nz * hw,
+          ax + nx * hw,
+          az + nz * hw,
+        );
+        dist += run;
+      } else {
+        dist += period - phase;
+      }
+    }
+    carry = (carry + len) % period;
+  }
+}
+
+/** Flat xz marking + curb ribbons for carriageways (draped later in city.js). */
+export function emitRoadDressing(centerlines) {
+  const markings = [];
+  const curbs = [];
+  for (const line of centerlines || []) {
+    if (!line?.pts || line.pts.length < 2) continue;
+    if (line.quay || line.roundabout) continue;
+    const closed = Boolean(line.closed);
+    const halfAt = (i) => {
+      if (Array.isArray(line.half)) return line.half[Math.min(i, line.half.length - 1)] || 3.2;
+      return Number(line.half) || 3.2;
+    };
+    const meanH = line.pts.reduce((s, _, i) => s + halfAt(i), 0) / line.pts.length;
+    if (meanH < 2.2) continue;
+    // Edge lines just inside asphalt.
+    emitLaneStrip(line.pts, halfAt, closed, (i, h) => h - 0.18, 0.12, markings);
+    emitLaneStrip(line.pts, halfAt, closed, (i, h) => -(h - 0.18), 0.12, markings);
+    emitDashedCenter(line.pts, halfAt, closed, markings);
+    // Narrow curb tops at asphalt/sidewalk boundary.
+    emitLaneStrip(line.pts, halfAt, closed, (i, h) => h + 0.06, 0.22, curbs);
+    emitLaneStrip(line.pts, halfAt, closed, (i, h) => -(h + 0.06), 0.22, curbs);
+  }
+  return { markings, curbs };
+}
+
 function emitClosedSide(chain, side, bucket) {
   const inner = [];
   const outer = [];
@@ -1024,10 +1138,13 @@ export function buildRoadGeometry(features, projector) {
   asphalt.push(...patches.asphalt);
   walk.push(...patches.walk);
   pave.push(...patches.pave);
+  const dressing = emitRoadDressing(centerlines);
   return {
     asphalt,
     walk,
     pave,
+    markings: dressing.markings,
+    curbs: dressing.curbs,
     labels,
     centerlines,
     quayChains,

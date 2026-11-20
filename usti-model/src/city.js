@@ -197,6 +197,17 @@ function doorStrip(ring, groundAt, base, top, edgeIndex = null) {
   const positions = [x0, yb, z0, x1, yb, z1, x1, yt, z1, x0, yb, z0, x1, yt, z1, x0, yt, z0];
   const normals = [];
   for (let k = 0; k < 6; k++) normals.push(nx, 0, nz);
+  // Light frame + lintel for walk-height entry read.
+  const out = 0.07;
+  const thick = 0.11;
+  const fx0 = mx - tx * (hw + thick) + nx * (0.1 + out);
+  const fz0 = mz - tz * (hw + thick) + nz * (0.1 + out);
+  const fx1 = mx + tx * (hw + thick) + nx * (0.1 + out);
+  const fz1 = mz + tz * (hw + thick) + nz * (0.1 + out);
+  const ly0 = yt;
+  const ly1 = yt + 0.22;
+  positions.push(fx0, ly0, fz0, fx1, ly0, fz1, fx1, ly1, fz1, fx0, ly0, fz0, fx1, ly1, fz1, fx0, ly1, fz0);
+  for (let k = 0; k < 6; k++) normals.push(nx, 0, nz);
   return { positions, normals };
 }
 
@@ -467,23 +478,36 @@ function facadeOnBeforeCompile(shader) {
       `#include <color_fragment>
       float fx = mod(vFacadeUv.x, 3.05);
       float fy = fract(vFacadeUv.y);
-      // Darker recessed panes + light frame for street-level facade depth.
+      float ground = 1.0 - step(1.0, vFacadeUv.y);
+      float gfy = clamp(vFacadeUv.y, 0.0, 1.0);
+      // Upper floors: recessed panes + light frame.
       float pane = step(0.52, fx) * step(fx, 2.36) * step(0.30, fy) * step(fy, 0.72);
       float frame = step(0.42, fx) * step(fx, 2.46) * step(0.24, fy) * step(fy, 0.78) * (1.0 - pane);
+      // Ground floor: wider shopfront glass + darker entry bay + awning strip.
+      float shop = ground * step(0.18, fx) * step(fx, 2.88) * step(0.22, gfy) * step(gfy, 0.82);
+      float entry = ground * step(1.15, fx) * step(fx, 1.9) * step(0.0, gfy) * step(gfy, 0.78);
+      float awning = ground * step(0.84, gfy) * step(gfy, 0.94) * step(0.1, fx) * step(fx, 2.95);
+      float sill = ground * step(0.16, gfy) * step(gfy, 0.24);
       float course = step(fy, 0.045);
       float grain = fract(sin(dot(floor(vFacadeUv * vec2(7.0, 11.0)), vec2(12.9898, 78.233))) * 43758.5453);
       vec3 plaster = diffuseColor.rgb * (0.94 + grain * 0.08);
       vec3 glass = vec3(0.12, 0.15, 0.18);
-      plaster = mix(plaster, glass, pane * 0.88);
-      plaster = mix(plaster, plaster * vec3(0.86, 0.84, 0.80), frame);
+      vec3 shopGlass = vec3(0.10, 0.14, 0.18);
+      vec3 doorBay = vec3(0.16, 0.12, 0.10);
+      plaster = mix(plaster, glass, pane * (1.0 - ground) * 0.88);
+      plaster = mix(plaster, plaster * vec3(0.86, 0.84, 0.80), frame * (1.0 - ground));
+      plaster = mix(plaster, shopGlass, shop * 0.92);
+      plaster = mix(plaster, doorBay, entry * 0.85);
+      plaster = mix(plaster, plaster * vec3(0.55, 0.42, 0.28), awning);
+      plaster = mix(plaster, plaster * vec3(0.78, 0.74, 0.68), sill);
       plaster *= mix(1.0, 0.78, course);
-      float cornice = step(0.9, fy);
+      float cornice = step(0.9, fy) * (1.0 - ground);
       plaster = mix(plaster, plaster * vec3(0.74, 0.70, 0.64), cornice);
-      float baseBand = 1.0 - smoothstep(0.0, 0.14, fy);
-      plaster *= mix(1.0, 0.86, baseBand);
+      float baseBand = ground * (1.0 - smoothstep(0.0, 0.12, gfy));
+      plaster *= mix(1.0, 0.82, baseBand);
       float id = floor(vFacadeUv.x / 3.05) * 17.0 + floor(vFacadeUv.y * 9.0);
       float lit = step(0.5, fract(sin(id * 127.13) * 43758.5453));
-      diffuseColor.rgb = plaster + vec3(1.0, 0.48, 0.08) * pane * lit * nightGlow * 3.4;`,
+      diffuseColor.rgb = plaster + vec3(1.0, 0.48, 0.08) * pane * (1.0 - ground) * lit * nightGlow * 3.4;`,
     );
 }
 
@@ -543,7 +567,7 @@ function pyramidRoof(ring, sample, top, rise) {
 function facadeMaterial(color) {
   const material = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
   material.onBeforeCompile = facadeOnBeforeCompile;
-  material.customProgramCacheKey = () => 'usti-facade-v7-town';
+  material.customProgramCacheKey = () => 'usti-facade-v8-shop';
   return material;
 }
 
@@ -934,7 +958,7 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   const points = [];
   const occupied = new Set();
   const claim = (x, z) => {
-    const key = `${Math.round(x / 4.4)},${Math.round(z / 4.4)}`;
+    const key = `${Math.round(x / 3.2)},${Math.round(z / 3.2)}`;
     if (occupied.has(key)) return false;
     occupied.add(key);
     return true;
@@ -955,6 +979,41 @@ function addTrees(group, data, projector, sample, roads, blockers) {
       tint: treeUnit(3, x, z),
     });
   };
+  // Sidewalk rhythm: trees just outside the carriageway every ~18 m (41501-like spacing).
+  // Skip building blockers here — footprints often hug the curb and would wipe the row.
+  for (const seg of roads.segs || []) {
+    const dx = seg.b[0] - seg.a[0];
+    const dz = seg.b[1] - seg.a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 8) continue;
+    const tx = dx / len;
+    const tz = dz / len;
+    const nx = -tz;
+    const nz = tx;
+    const step = 18;
+    for (let d = 5; d < len - 3; d += step) {
+      const cx = seg.a[0] + tx * d;
+      const cz = seg.a[1] + tz * d;
+      const sides = len > 24 ? [1, -1] : [treeUnit(10, cx, cz) > 0.5 ? 1 : -1];
+      for (const side of sides) {
+        const ox = cx + nx * (seg.half + 1.55) * side;
+        const oz = cz + nz * (seg.half + 1.55) * side;
+        if (ox < projector.minX + 3 || ox > projector.maxX - 3 || oz < projector.minZ + 3 || oz > projector.maxZ - 3) continue;
+        const hit = roads.query(ox, oz, 20);
+        if (!hit || hit.dist < hit.half + 0.7 || hit.dist > hit.half + 3.4) continue;
+        if (!claim(ox, oz)) continue;
+        const roll = treeUnit(1, ox, oz);
+        points.push({
+          x: ox,
+          z: oz,
+          y: sample(ox, oz),
+          scale: 0.78 + roll * 0.5,
+          rot: treeUnit(2, ox, oz) * Math.PI * 2,
+          tint: treeUnit(3, ox, oz),
+        });
+      }
+    }
+  }
   const box = [projector.minX, projector.minZ, projector.maxX, projector.maxZ];
   const scatterArea = (feature, spacing) => {
     eachPolygon(feature.geometry, (coords) => {
@@ -1024,7 +1083,7 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   for (const feature of data.landuse?.features || []) {
     if (feature.properties?.landuse === 'forest') scatterArea(feature, 11);
   }
-  if (!points.length) return { count: 0, trunks: null, canopy: null };
+  if (!points.length) return { count: 0, trunks: null, canopy: null, rings: null };
   // Slightly richer greens against muted plaster (town-skyline contrast).
   const greens = [0x2f7a38, 0x3f8c40, 0x529646, 0x267034, 0x5fa04c];
   const trunks = new THREE.InstancedMesh(
@@ -1035,6 +1094,11 @@ function addTrees(group, data, projector, sample, roads, blockers) {
   const canopy = new THREE.InstancedMesh(
     canopyGeometry(),
     new THREE.MeshLambertMaterial({ color: 0xffffff }),
+    points.length,
+  );
+  const rings = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.62, 0.72, 0.1, 8).translate(0, 0.05, 0),
+    new THREE.MeshLambertMaterial({ color: 0x3e2a18 }),
     points.length,
   );
   const dummy = new THREE.Object3D();
@@ -1054,17 +1118,25 @@ function addTrees(group, data, projector, sample, roads, blockers) {
     canopy.setMatrixAt(index, dummy.matrix);
     color.setHex(greens[Math.floor(point.tint * greens.length) % greens.length]);
     canopy.setColorAt(index, color);
+    const ringR = 0.72 + point.scale * 0.28;
+    dummy.position.set(point.x, point.y + 0.02, point.z);
+    dummy.scale.set(ringR, 1, ringR);
+    dummy.rotation.set(0, point.rot, 0);
+    dummy.updateMatrix();
+    rings.setMatrixAt(index, dummy.matrix);
   });
   trunks.instanceMatrix.needsUpdate = true;
   canopy.instanceMatrix.needsUpdate = true;
+  rings.instanceMatrix.needsUpdate = true;
   if (canopy.instanceColor) canopy.instanceColor.needsUpdate = true;
   const grove = new THREE.Group();
   grove.name = 'trees';
-  grove.add(trunks, canopy);
+  grove.add(trunks, canopy, rings);
   group.add(grove);
   trunks.userData.fullCount = points.length;
   canopy.userData.fullCount = points.length;
-  return { count: points.length, trunks, canopy };
+  rings.userData.fullCount = points.length;
+  return { count: points.length, trunks, canopy, rings };
 }
 
 function surfaceMaterial(texture, fallback, scale, key, offset = -3) {
@@ -1202,6 +1274,8 @@ export async function buildCity(data, projector, hooks = {}) {
   const walkParts = [];
   const asphaltParts = [];
   const paveParts = [];
+  const markingParts = [];
+  const curbParts = [];
   const waterParts = [];
   const parkParts = [];
   const blockers = [];
@@ -1348,6 +1422,8 @@ export async function buildCity(data, projector, hooks = {}) {
   drapeFlat(roads.asphalt, sample, 0.04, asphaltParts, skipSurface);
   drapeFlat(roads.walk, sample, 0.04, walkParts, skipSurface);
   drapeFlat(roads.pave, sample, 0.04, paveParts, skipSurface);
+  drapeFlat(roads.curbs || [], sample, 0.09, curbParts, skipSurface);
+  drapeFlat(roads.markings || [], sample, 0.11, markingParts, skipSurface);
   stats.roads = roads.stats.chains;
   stats.sidewalks = roads.stats.sidewalkRuns;
   for (const label of roads.labels) rememberLine(streetLabels, label.name, label.pts, sample, 4.2);
@@ -1535,6 +1611,38 @@ export async function buildCity(data, projector, hooks = {}) {
     asphaltMesh.name = 'asphalt';
     asphaltMesh.renderOrder = 3;
     group.add(asphaltMesh);
+  }
+  const curbGeo = geometryFromParts(curbParts);
+  if (curbGeo) {
+    const curbMesh = new THREE.Mesh(
+      curbGeo,
+      new THREE.MeshLambertMaterial({
+        color: 0xb8b2a6,
+        polygonOffset: true,
+        polygonOffsetFactor: -6,
+        polygonOffsetUnits: -6,
+      }),
+    );
+    curbMesh.name = 'curb';
+    curbMesh.renderOrder = 4;
+    group.add(curbMesh);
+  }
+  const markingGeo = geometryFromParts(markingParts);
+  if (markingGeo) {
+    const markingMesh = new THREE.Mesh(
+      markingGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xf4f1ea,
+        toneMapped: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -10,
+        polygonOffsetUnits: -10,
+      }),
+    );
+    markingMesh.name = 'markings';
+    markingMesh.renderOrder = 5;
+    markingMesh.userData.noShadow = true;
+    group.add(markingMesh);
   }
   const waterMesh = geometryFromParts(waterParts);
   let waterMaterial = null;
